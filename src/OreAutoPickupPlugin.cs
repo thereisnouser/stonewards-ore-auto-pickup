@@ -1,0 +1,542 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using BepInEx;
+using BepInEx.Configuration;
+using Mirror;
+using UnityEngine;
+using Cursor = UnityEngine.Cursor;
+
+namespace StonewardsOreAutoPickup
+{
+    [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
+    public sealed class OreAutoPickupPlugin : BaseUnityPlugin
+    {
+        public const string PluginGuid = "community.stonewards.oreautopickup";
+        public const string PluginName = "Stonewards Ore Auto Pickup";
+        public const string PluginVersion = "0.1.0";
+
+        private const float ScanInterval = 0.32f;
+        private const float DiscoveryInterval = 4f;
+        private const float RetryDelay = 2.5f;
+        private const int MaxPickupRequestsPerScan = 8;
+        private const float WindowWidth = 516f;
+        private const float WindowHeight = 602f;
+
+        // Colors follow Stonewards/PartyHUD: graphite, slate, burgundy, and warm gold.
+        private static readonly Color Frame = new Color(0.72f, 0.64f, 0.48f, 1f);
+        private static readonly Color Background = new Color(19f / 255f, 23f / 255f, 32f / 255f, 0.99f);
+        private static readonly Color Header = new Color(76f / 255f, 46f / 255f, 48f / 255f, 1f);
+        private static readonly Color Slot = new Color(0.25f, 0.32f, 0.38f, 1f);
+        private static readonly Color MutedSlot = new Color(0.15f, 0.19f, 0.24f, 1f);
+        private static readonly Color Gold = new Color(240f / 255f, 200f / 255f, 94f / 255f, 1f);
+        private static readonly Color Text = new Color(0.95f, 0.95f, 0.95f, 1f);
+        private static readonly Color MutedText = new Color(0.69f, 0.72f, 0.76f, 1f);
+        private static readonly Color Divider = new Color(0.71f, 0.63f, 0.48f, 0.42f);
+
+        private sealed class OreOption
+        {
+            public string Id;
+            public string Name;
+            public ConfigEntry<bool> AutoPick;
+        }
+
+        private readonly Dictionary<string, OreOption> _oresById =
+            new Dictionary<string, OreOption>(StringComparer.Ordinal);
+        private readonly List<OreOption> _orderedOres = new List<OreOption>();
+        private readonly Dictionary<int, float> _recentAttempts = new Dictionary<int, float>();
+        private static readonly BindingFlags AllInstance = BindingFlags.Instance |
+            BindingFlags.Public | BindingFlags.NonPublic;
+        private static readonly FieldInfo ResourceClustersField =
+            typeof(DigMatterProfileSO).GetField("resourceClusters", AllInstance);
+        private readonly Dictionary<Type, FieldInfo> _clusterItemFields =
+            new Dictionary<Type, FieldInfo>();
+
+        private ConfigEntry<bool> _enabled;
+        private ConfigEntry<float> _radius;
+        private ConfigEntry<KeyboardShortcut> _settingsKey;
+        private bool _menuOpen;
+        private bool _captureShortcut;
+        private bool _ownsInputState;
+        private InputManager.InputState _returnInputState;
+        private CursorLockMode _previousCursorLock;
+        private bool _previousCursorVisible;
+        private float _nextDiscovery;
+        private float _nextScan;
+        private float _nextCleanup;
+        private Vector2 _scroll;
+        private string _notice = "";
+        private bool _warnedNoProfileField;
+        private bool _loggedDiscovery;
+        private GUIStyle _titleStyle;
+        private GUIStyle _labelStyle;
+        private GUIStyle _mutedStyle;
+        private GUIStyle _buttonStyle;
+        private GUIStyle _miniStyle;
+        private GUIStyle _smallGoldStyle;
+
+        private void Awake()
+        {
+            _enabled = Config.Bind("General", "Enabled", true,
+                "Automatically collect only the selected mined resources.");
+            _radius = Config.Bind("General", "PickupRadius", 2.5f,
+                new ConfigDescription("Pickup radius in meters; avoid values larger than native interaction range.",
+                    new AcceptableValueRange<float>(1f, 4f)));
+            _settingsKey = Config.Bind("Hotkeys", "ToggleSettings",
+                new KeyboardShortcut(KeyCode.F10),
+                "Open/close the built-in ore selection menu. Ctrl/Shift/Alt combinations are supported.");
+            Logger.LogInfo("Ore Auto Pickup v" + PluginVersion + " initialized.");
+        }
+
+        private void Update()
+        {
+            if (_menuOpen && !_captureShortcut &&
+                (_settingsKey.Value.IsDown() || Input.GetKeyDown(KeyCode.Escape)))
+            {
+                CloseMenu();
+            }
+            else if (!_menuOpen && _settingsKey.Value.IsDown())
+            {
+                OpenMenu();
+            }
+
+            if (_menuOpen)
+            {
+                // A native menu or level transition can take over the input manager.
+                var manager = InputManager.Instance;
+                if (manager == null ||
+                    manager.CurrentInputState != InputManager.InputState.GeneralMenu)
+                {
+                    CloseMenu(false);
+                }
+                else
+                {
+                    Cursor.lockState = CursorLockMode.None;
+                    Cursor.visible = true;
+                }
+            }
+
+            if (Time.unscaledTime >= _nextDiscovery)
+            {
+                _nextDiscovery = Time.unscaledTime + DiscoveryInterval;
+                DiscoverOres();
+            }
+
+            if (!_enabled.Value || _menuOpen || Time.unscaledTime < _nextScan)
+                return;
+
+            _nextScan = Time.unscaledTime + ScanInterval;
+            TryPickupNearbyOres();
+        }
+
+        private void DiscoverOres()
+        {
+            if (ResourceClustersField == null)
+            {
+                if (!_warnedNoProfileField)
+                {
+                    Logger.LogWarning("DigMatterProfileSO.resourceClusters is unavailable. No ore type is assumed or guessed.");
+                    _warnedNoProfileField = true;
+                }
+                return;
+            }
+            try
+            {
+                var profiles = Resources.FindObjectsOfTypeAll<DigMatterProfileSO>();
+                var changed = false;
+                foreach (var profile in profiles)
+                {
+                    if (profile == null)
+                        continue;
+                    var clusters = ResourceClustersField.GetValue(profile) as IEnumerable;
+                    if (clusters == null)
+                        continue;
+
+                    foreach (var cluster in clusters)
+                    {
+                        if (cluster == null)
+                            continue;
+                        var clusterType = cluster.GetType();
+                        if (!_clusterItemFields.TryGetValue(clusterType, out var itemField))
+                        {
+                            itemField = clusterType.GetField("resourceCluster", AllInstance);
+                            _clusterItemFields[clusterType] = itemField;
+                        }
+                        var item = itemField == null ? null : itemField.GetValue(cluster) as ItemDataSO;
+                        if (item == null || item.isScrapItem || string.IsNullOrEmpty(item.itemID) ||
+                            _oresById.ContainsKey(item.itemID))
+                            continue;
+
+                        string id = item.itemID;
+                        string name = id;
+                        try
+                        {
+                            var localized = item.GetLocalizedName();
+                            if (!string.IsNullOrEmpty(localized))
+                                name = localized;
+                        }
+                        catch (Exception) { /* Localization may not be available in the hub. */ }
+
+                        // Each stable game item ID gets its own persisted BepInEx setting.
+                        var option = new OreOption
+                        {
+                            Id = id,
+                            Name = name,
+                            AutoPick = Config.Bind("Ores", id, true,
+                                "Automatically collect the mined resource " + name + " (" + id + ").")
+                        };
+                        _oresById.Add(id, option);
+                        _orderedOres.Add(option);
+                        changed = true;
+                    }
+                }
+                if (changed)
+                {
+                    _orderedOres.Sort((a, b) =>
+                        string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+                    Config.Save();
+                    Logger.LogInfo("Found " + _orderedOres.Count + " mined resource types: " +
+                        string.Join(", ", _orderedOres.ConvertAll(x => x.Id).ToArray()));
+                    _loggedDiscovery = true;
+                }
+                else if (!_loggedDiscovery && _orderedOres.Count == 0)
+                {
+                    Logger.LogInfo("Ore data not loaded yet; enter a level to discover actual mined resources.");
+                    _loggedDiscovery = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Ore discovery failed: " + ex.Message);
+            }
+        }
+
+        private static FirstPersonController LocalPlayer()
+        {
+            var players = FirstPersonController.LocalPlayers;
+            if (players == null)
+                return null;
+            foreach (var player in players)
+                if (player != null && player.isLocalPlayer)
+                    return player;
+            return null;
+        }
+
+        private void TryPickupNearbyOres()
+        {
+            if (_oresById.Count == 0 || !NetworkClient.active)
+                return;
+            var input = InputManager.Instance;
+            if (input == null || input.CurrentInputState != InputManager.InputState.Gameplay)
+                return;
+            var player = LocalPlayer();
+            if (player == null || player.PlayerStats == null || player.PlayerStats.isDead)
+                return;
+
+            var radiusSquared = _radius.Value * _radius.Value;
+            var playerPosition = player.transform.position;
+            int requested = 0;
+            try
+            {
+                var pickups = UnityEngine.Object.FindObjectsOfType<PickableItem>();
+                foreach (var pickup in pickups)
+                {
+                    if (pickup == null || !pickup.isActiveAndEnabled)
+                        continue;
+                    var item = pickup.ItemDataSO;
+                    if (item == null || string.IsNullOrEmpty(item.itemID) ||
+                        !_oresById.TryGetValue(item.itemID, out var option) ||
+                        !option.AutoPick.Value)
+                        continue;
+
+                    if ((pickup.transform.position - playerPosition).sqrMagnitude > radiusSquared)
+                        continue;
+
+                    var instanceId = pickup.GetInstanceID();
+                    if (_recentAttempts.TryGetValue(instanceId, out var nextAllowed) &&
+                        Time.unscaledTime < nextAllowed)
+                        continue;
+                    _recentAttempts[instanceId] = Time.unscaledTime + RetryDelay;
+
+                    // Native command: the host remains authoritative about inventory and pickup lifetime.
+                    // NEVER use CmdForcePickupItem (it can create items without consuming a world drop).
+                    player.CmdAutoPickupItem(player, pickup);
+                    requested++;
+                    if (requested >= MaxPickupRequestsPerScan)
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Pickup scan failed: " + ex.Message);
+            }
+
+            if (Time.unscaledTime > _nextCleanup)
+            {
+                _nextCleanup = Time.unscaledTime + 45f;
+                _recentAttempts.Clear();
+            }
+        }
+
+        private void OpenMenu()
+        {
+            var input = InputManager.Instance;
+            if (input == null || GameManager.Instance == null)
+                return;
+            var state = input.CurrentInputState;
+            if (state != InputManager.InputState.Gameplay &&
+                state != InputManager.InputState.Dead)
+                return;
+            _returnInputState = state;
+            _previousCursorLock = Cursor.lockState;
+            _previousCursorVisible = Cursor.visible;
+            _menuOpen = true;
+            _ownsInputState = true;
+            _captureShortcut = false;
+            _notice = "";
+            DiscoverOres();
+            input.SetState(InputManager.InputState.GeneralMenu);
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
+
+        private void CloseMenu(bool restoreInput = true)
+        {
+            if (!_menuOpen)
+                return;
+            _menuOpen = false;
+            _captureShortcut = false;
+            var input = InputManager.Instance;
+            if (_ownsInputState && input != null &&
+                input.CurrentInputState == InputManager.InputState.GeneralMenu && restoreInput)
+            {
+                var local = LocalPlayer();
+                var state = local != null && local.PlayerStats != null
+                    ? (local.PlayerStats.isDead ? InputManager.InputState.Dead : InputManager.InputState.Gameplay)
+                    : _returnInputState;
+                input.SetState(state);
+            }
+            _ownsInputState = false;
+            if (restoreInput)
+            {
+                Cursor.lockState = _previousCursorLock;
+                Cursor.visible = _previousCursorVisible;
+            }
+        }
+
+        private void OnDisable() { CloseMenu(); }
+        private void OnDestroy() { CloseMenu(); }
+
+        private static void Fill(Rect r, Color color)
+        {
+            var old = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = old;
+        }
+
+        private static void Panel(Rect r, Color background)
+        {
+            Fill(r, Frame);
+            Fill(new Rect(r.x + 2f, r.y + 2f, r.width - 4f, r.height - 4f), background);
+        }
+
+        private bool Button(Rect r, string content, bool selected = false)
+        {
+            Fill(r, selected ? Header : Slot);
+            Fill(new Rect(r.x, r.y, r.width, 1f), selected ? Gold : Frame);
+            Fill(new Rect(r.x, r.y + r.height - 1f, r.width, 1f), Frame);
+            return GUI.Button(r, content, _buttonStyle);
+        }
+
+        private void EnsureStyles()
+        {
+            if (_titleStyle != null)
+                return;
+            _titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 18, fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Gold }
+            };
+            _labelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14, fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Text }
+            };
+            _mutedStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12, alignment = TextAnchor.MiddleLeft,
+                wordWrap = true,
+                normal = { textColor = MutedText }
+            };
+            _smallGoldStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12, fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Gold }
+            };
+            _buttonStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 12, fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { background = null, textColor = Text },
+                hover = { background = null, textColor = Gold },
+                active = { background = null, textColor = Gold },
+                focused = { background = null, textColor = Text },
+            };
+        }
+
+        private void OnGUI()
+        {
+            if (!_menuOpen || Event.current == null)
+                return;
+            EnsureStyles();
+            var oldMatrix = GUI.matrix;
+            var oldDepth = GUI.depth;
+            float scale = Mathf.Clamp(Mathf.Min(Screen.width / 1120f, Screen.height / 740f), 0.65f, 1.25f);
+            try
+            {
+                GUI.depth = -550;
+                GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+                float x = Mathf.Max(0f, (Screen.width / scale - WindowWidth) * 0.5f);
+                float y = Mathf.Max(0f, (Screen.height / scale - WindowHeight) * 0.5f);
+                DrawMenu(x, y);
+            }
+            finally
+            {
+                GUI.matrix = oldMatrix;
+                GUI.depth = oldDepth;
+            }
+        }
+
+        private void DrawMenu(float x, float y)
+        {
+            Panel(new Rect(x, y, WindowWidth, WindowHeight), Background);
+            Fill(new Rect(x + 2f, y + 2f, WindowWidth - 4f, 57f), Header);
+            Fill(new Rect(x + 2f, y + 58f, WindowWidth - 4f, 2f), Gold);
+            GUI.Label(new Rect(x + 20f, y + 13f, 400f, 28f), "ORE AUTO PICKUP", _titleStyle);
+            if (Button(new Rect(x + WindowWidth - 52f, y + 14f, 31f, 30f), "X"))
+                CloseMenu();
+
+            GUI.Label(new Rect(x + 20f, y + 72f, 285f, 25f), "Automatic collection", _labelStyle);
+            if (Button(new Rect(x + WindowWidth - 112f, y + 73f, 90f, 28f),
+                _enabled.Value ? "ENABLED" : "DISABLED", _enabled.Value))
+            {
+                _enabled.Value = !_enabled.Value;
+                Config.Save();
+            }
+
+            GUI.Label(new Rect(x + 20f, y + 109f, 260f, 23f), "Pickup radius", _labelStyle);
+            var radiusRect = new Rect(x + 200f, y + 115f, 204f, 18f);
+            var newRadius = GUI.HorizontalSlider(radiusRect, _radius.Value, 1f, 4f);
+            if (Mathf.Abs(newRadius - _radius.Value) > 0.04f)
+            {
+                _radius.Value = (float)Math.Round(newRadius * 10f) / 10f;
+                Config.Save();
+            }
+            GUI.Label(new Rect(x + 414f, y + 106f, 74f, 30f),
+                _radius.Value.ToString("0.0") + " m", _smallGoldStyle);
+            Fill(new Rect(x + 20f, y + 146f, WindowWidth - 40f, 1f), Divider);
+
+            GUI.Label(new Rect(x + 20f, y + 154f, 325f, 25f), "Mined resources", _labelStyle);
+            if (Button(new Rect(x + 295f, y + 154f, 90f, 26f), "ALL ON"))
+                SetAll(true);
+            if (Button(new Rect(x + 394f, y + 154f, 100f, 26f), "ALL OFF"))
+                SetAll(false);
+
+            var view = new Rect(x + 20f, y + 190f, WindowWidth - 40f, 245f);
+            Panel(view, MutedSlot);
+            var scrollHeight = Mathf.Max(view.height - 4f, _orderedOres.Count * 42f + 12f);
+            _scroll = GUI.BeginScrollView(new Rect(view.x + 3f, view.y + 3f, view.width - 6f, view.height - 6f),
+                _scroll, new Rect(0f, 0f, view.width - 25f, scrollHeight));
+            if (_orderedOres.Count == 0)
+            {
+                GUI.Label(new Rect(12f, 13f, view.width - 35f, 64f),
+                    "Ore definitions not loaded. Enter a level and mine a resource; discovery will retry automatically.",
+                    _mutedStyle);
+            }
+            else
+            {
+                for (int i = 0; i < _orderedOres.Count; i++)
+                {
+                    var option = _orderedOres[i];
+                    float ry = 8f + i * 42f;
+                    Fill(new Rect(8f, ry, view.width - 36f, 36f), Slot);
+                    GUI.Label(new Rect(19f, ry + 2f, view.width - 161f, 30f),
+                        option.Name, _labelStyle);
+                    bool active = option.AutoPick.Value;
+                    if (Button(new Rect(view.width - 139f, ry + 3f, 104f, 29f),
+                        active ? "AUTO: ON" : "AUTO: OFF", active))
+                    {
+                        option.AutoPick.Value = !active;
+                        Config.Save();
+                        _notice = option.Name + " saved";
+                    }
+                }
+            }
+            GUI.EndScrollView();
+
+            Fill(new Rect(x + 20f, y + 447f, WindowWidth - 40f, 1f), Divider);
+            GUI.Label(new Rect(x + 20f, y + 459f, 260f, 30f), "Settings shortcut", _labelStyle);
+            string keyText = _captureShortcut ? "PRESS KEY..." : _settingsKey.Value.ToString();
+            if (Button(new Rect(x + 283f, y + 459f, 212f, 31f), keyText, _captureShortcut))
+            {
+                _captureShortcut = true;
+                _notice = "Press Esc to cancel";
+            }
+            if (_captureShortcut)
+                CaptureShortcut();
+
+            GUI.Label(new Rect(x + 20f, y + 501f, WindowWidth - 40f, 32f),
+                "Only mined resources are collected. Manual pickup remains unchanged.", _mutedStyle);
+            GUI.Label(new Rect(x + 20f, y + 537f, WindowWidth - 40f, 20f),
+                _orderedOres.Count + " resource types found" +
+                (string.IsNullOrEmpty(_notice) ? "" : "    |    " + _notice), _smallGoldStyle);
+            if (Button(new Rect(x + 20f, y + 564f, WindowWidth - 40f, 27f), "CLOSE SETTINGS"))
+                CloseMenu();
+        }
+
+        private void SetAll(bool value)
+        {
+            foreach (var option in _orderedOres)
+                option.AutoPick.Value = value;
+            Config.Save();
+            _notice = value ? "All mined resources enabled" : "All mined resources disabled";
+        }
+
+        private void CaptureShortcut()
+        {
+            var e = Event.current;
+            if (e.type != EventType.KeyDown)
+                return;
+            if (e.keyCode == KeyCode.Escape)
+            {
+                _captureShortcut = false;
+                _notice = "Shortcut change canceled";
+                e.Use();
+                return;
+            }
+            if (e.keyCode == KeyCode.None || IsModifier(e.keyCode))
+                return;
+            var modifiers = new List<KeyCode>(3);
+            if (e.control) modifiers.Add(KeyCode.LeftControl);
+            if (e.shift) modifiers.Add(KeyCode.LeftShift);
+            if (e.alt) modifiers.Add(KeyCode.LeftAlt);
+            _settingsKey.Value = new KeyboardShortcut(e.keyCode, modifiers.ToArray());
+            Config.Save();
+            _captureShortcut = false;
+            _notice = "Shortcut saved";
+            e.Use();
+        }
+
+        private static bool IsModifier(KeyCode key)
+        {
+            return key == KeyCode.LeftControl || key == KeyCode.RightControl ||
+                key == KeyCode.LeftAlt || key == KeyCode.RightAlt ||
+                key == KeyCode.LeftShift || key == KeyCode.RightShift;
+        }
+    }
+}
