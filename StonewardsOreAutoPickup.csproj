@@ -26,5 +26,6 @@
     <Error Condition="'$(GameDir)' == ''" Text="Specify -p:GameDir=... or STONEWARDS_GAME_DIR." />
     <Error Condition="!Exists('$(ManagedDir)\Assembly-CSharp.dll')" Text="Game assembly not found: $(ManagedDir)\Assembly-CSharp.dll" />
     <Error Condition="!Exists('$(BepInExCoreDir)\BepInEx.dll')" Text="BepInEx 5 not found: $(BepInExCoreDir)\BepInEx.dll" />
+    <Error Condition="!Exists('$(BepInExCoreDir)\0Harmony.dll')" Text="Harmony is not installed: $(BepInExCoreDir)\0Harmony.dll" />
   </Target>
 </Project>
