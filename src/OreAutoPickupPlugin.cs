@@ -15,7 +15,7 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.2";
+        public const string PluginVersion = "0.2.3";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
@@ -226,14 +226,17 @@ namespace StonewardsOreAutoPickup
                             Id = id,
                             Name = name,
                             Icon = item.itemIcon,
-                            Tint = OreTint(id + " " + name, item.Rarity, item.itemIcon),
+                            Tint = OreTint(id, item.itemIcon),
                             AutoPick = Config.Bind("Ores", id, true,
                                 "Automatically collect the mined resource " + name + " (" + id + ").")
                         };
                         _oresById.Add(id, option);
                         _orderedOres.Add(option);
-                        Logger.LogInfo("Ore UI color: " + id + " #" +
-                            ColorUtility.ToHtmlStringRGB(option.Tint));
+                        Logger.LogInfo("Discovered real mined resource: ID=" + id +
+                            "; Name=" + name +
+                            "; Icon=" + (item.itemIcon == null ? "<none>" : item.itemIcon.name) +
+                            "; Rarity=" + item.Rarity +
+                            "; Tint=#" + ColorUtility.ToHtmlStringRGB(option.Tint));
                         changed = true;
                     }
                 }
@@ -505,63 +508,19 @@ namespace StonewardsOreAutoPickup
         }
 
         /// <summary>
-        /// Prefer the actual item sprite, not item rarity. Most basic ores share
-        /// the same rarity, so the old rarity-based fallback made them identical.
-        /// Texture readback is deliberately CPU-only and one-time per ore; some
-        /// game atlases are non-readable, so safely fall back to material names.
+        /// The game's discovered item database is the only authority for ore
+        /// identities. Sample the real sprite where Unity permits texture access.
+        /// If the atlas is not readable, use a deterministic color per exact item ID.
+        /// No speculative names or invented ore catalog.
         /// </summary>
-        private static Color OreTint(string label, Rarity rarity, Sprite icon)
+        private static Color OreTint(string id, Sprite icon)
         {
-            string name = (label ?? "").ToLowerInvariant();
-            if (name.Contains("gold") || name.Contains("золот"))
-                return new Color(1f, 0.78f, 0.24f);
-            if (name.Contains("silver") || name.Contains("сереб"))
-                return new Color(0.72f, 0.89f, 1f);
-            if (name.Contains("copper") || name.Contains("медн") || name.Contains("медь"))
-                return new Color(1f, 0.48f, 0.24f);
-            if (name.Contains("iron") || name.Contains("желез"))
-                return new Color(0.65f, 0.77f, 0.90f);
-            if (name.Contains("tin") || name.Contains("олов"))
-                return new Color(0.72f, 0.82f, 0.96f);
-            if (name.Contains("platinum") || name.Contains("платин"))
-                return new Color(0.53f, 0.90f, 0.99f);
-            if (name.Contains("titanium") || name.Contains("титан"))
-                return new Color(0.83f, 0.73f, 0.95f);
-            if (name.Contains("cobalt") || name.Contains("кобальт"))
-                return new Color(0.43f, 0.68f, 1f);
-            if (name.Contains("coal") || name.Contains("угол") || name.Contains("уголь"))
-                return new Color(0.65f, 0.69f, 0.75f);
-            if (name.Contains("stone") || name.Contains("камен") || name.Contains("камень"))
-                return new Color(0.73f, 0.70f, 0.59f);
-            if (name.Contains("sulfur") || name.Contains("sulphur") || name.Contains("сера"))
-                return new Color(1f, 0.93f, 0.30f);
-            if (name.Contains("uranium") || name.Contains("уран"))
-                return new Color(0.55f, 1f, 0.36f);
-            if (name.Contains("emerald") || name.Contains("изумруд"))
-                return new Color(0.36f, 1f, 0.62f);
-            if (name.Contains("ruby") || name.Contains("рубин"))
-                return new Color(1f, 0.39f, 0.46f);
-            if (name.Contains("sapphire") || name.Contains("сапфир"))
-                return new Color(0.43f, 0.67f, 1f);
-            if (name.Contains("amethyst") || name.Contains("аметист") ||
-                name.Contains("crystal") || name.Contains("кристалл"))
-                return new Color(0.79f, 0.50f, 1f);
-            if (name.Contains("diamond") || name.Contains("алмаз"))
-                return new Color(0.50f, 0.95f, 1f);
-            if (name.Contains("obsidian") || name.Contains("обсидиан"))
-                return new Color(0.67f, 0.51f, 0.85f);
-
-            // For unfamiliar materials, sample the ore's actual icon when
-            // readable instead of falling back to a shared rarity color.
             Color sampled;
             if (TrySampleIconColor(icon, out sampled))
                 return sampled;
 
-            // Unknown game or modded ores must still be visually distinguishable
-            // even when they share a rarity. Stable per-item ID, not Random or
-            // rarity, determines their high-contrast hue across sessions.
             uint hash = 2166136261u;
-            foreach (char character in name)
+            foreach (char character in id)
             {
                 hash ^= character;
                 hash *= 16777619u;
@@ -632,8 +591,8 @@ namespace StonewardsOreAutoPickup
             }
             catch (Exception)
             {
-                // Packed or otherwise unsupported sprites fall back to their
-                // known resource name or a stable item-ID palette.
+                // Packed or unsupported sprites use a stable palette based on the
+                // exact item ID provided by the game, not guessed ore names.
                 return false;
             }
         }
