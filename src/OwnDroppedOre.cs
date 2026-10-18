@@ -60,32 +60,41 @@ namespace StonewardsOreAutoPickup
         // (FirstPersonController player, string itemId, int count, int slot, Vector3 position)
         private static void BeforeItemRelease(FirstPersonController __instance, object[] __args)
         {
-            if (__instance == null || !__instance.isLocalPlayer ||
-                __args == null || __args.Length < 5 ||
-                !ReferenceEquals(__args[0], __instance))
-                return;
-
-            var id = __args[1] as string;
-            if (string.IsNullOrEmpty(id) || !( __args[4] is Vector3) ||
-                IsOreId == null || !IsOreId(id))
-                return;
-
-            var position = (Vector3)__args[4];
-            var request = new DropRequest
+            // Never allow failures in a mod hook to block the actual drop.
+            try
             {
-                Id = id,
-                Position = position,
-                Deadline = Time.unscaledTime + IdentificationWindow
-            };
+                if (__instance == null || !__instance.isLocalPlayer ||
+                    __args == null || __args.Length < 5 ||
+                    !ReferenceEquals(__args[0], __instance))
+                    return;
 
-            // Snapshot existing pickups to avoid mistaking ore already on the
-            // ground for the newly dropped inventory stack.
-            foreach (var pickable in UnityEngine.Object.FindObjectsOfType<PickableItem>())
-                if (pickable != null)
-                    request.Existing.Add(pickable.GetInstanceID());
+                var id = __args[1] as string;
+                if (string.IsNullOrEmpty(id) || !(__args[4] is Vector3) ||
+                    IsOreId == null || !IsOreId(id))
+                    return;
 
-            Pending.Add(request);
-            _log?.LogInfo("Ore dropped manually: " + id + " (auto pickup protected).");
+                var position = (Vector3)__args[4];
+                var request = new DropRequest
+                {
+                    Id = id,
+                    Position = position,
+                    Deadline = Time.unscaledTime + IdentificationWindow
+                };
+
+                // Snapshot the existing pickups before the host creates a new
+                // world object for the item dropped from the inventory.
+                foreach (var pickup in UnityEngine.Object.FindObjectsOfType<PickableItem>())
+                    if (pickup != null)
+                        request.Existing.Add(pickup.GetInstanceID());
+
+                Pending.Add(request);
+                _log?.LogInfo("Ore dropped manually: " + id +
+                    " (auto pickup protected).");
+            }
+            catch (Exception error)
+            {
+                _log?.LogWarning("Own-drop guard could not inspect drop: " + error.Message);
+            }
         }
 
         internal static void Observe(PickableItem[] pickups, Vector3 playerPosition)
@@ -102,7 +111,9 @@ namespace StonewardsOreAutoPickup
                     foreach (var pickup in pickups)
                     {
                         if (pickup == null || !pickup.isActiveAndEnabled ||
-                            request.Existing.Contains(pickup.GetInstanceID()))
+                            request.Existing.Contains(pickup.GetInstanceID()) ||
+                            (Ignored.TryGetValue(pickup.GetInstanceID(), out var tracked) &&
+                             tracked == pickup))
                             continue;
 
                         var item = pickup.ItemDataSO;
