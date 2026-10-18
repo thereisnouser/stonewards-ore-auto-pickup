@@ -15,7 +15,7 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.3";
+        public const string PluginVersion = "0.2.4";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
@@ -508,17 +508,45 @@ namespace StonewardsOreAutoPickup
         }
 
         /// <summary>
-        /// The game's discovered item database is the only authority for ore
-        /// identities. Sample the real sprite where Unity permits texture access.
-        /// If the atlas is not readable, use a deterministic color per exact item ID.
-        /// No speculative names or invented ore catalog.
+        /// Only exact resource IDs observed in real Stonewards 0.2.3 game logs
+        /// receive handcrafted, readable material colors. In particular,
+        /// IRON_MAP_2 = Copper, GOLD_MAP_2 = Platinum, and EMERALD_MAP_2 = Ruby:
+        /// never infer the ore material by splitting the technical item ID.
+        /// Other resources continue to be discovered dynamically and receive
+        /// an icon-derived tint (or a stable fallback color).
         /// </summary>
         private static Color OreTint(string id, Sprite icon)
         {
+            switch (id)
+            {
+                // Map 1 / Map 2: same material, different item IDs.
+                case "STONE":
+                case "STONE_MAP_2":
+                    return new Color32(190, 190, 178, 255); // warm stone gray
+                case "IRON":
+                    return new Color32(170, 194, 206, 255); // steel gray
+                case "DIAMOND":
+                    return new Color32(123, 223, 241, 255); // pale icy cyan
+                case "GOLD":
+                    return new Color32(255, 205, 86, 255); // gold
+                case "EMERALD":
+                    return new Color32(87, 219, 128, 255); // emerald green
+
+                // Map 2 IDs retain old game-internal names despite new materials.
+                case "IRON_MAP_2":
+                    return new Color32(235, 142, 86, 255); // Copper, NOT Iron
+                case "GOLD_MAP_2":
+                    return new Color32(216, 225, 236, 255); // Platinum, NOT Gold
+                case "EMERALD_MAP_2":
+                    return new Color32(244, 93, 115, 255); // Ruby, NOT Emerald
+            }
+
             Color sampled;
             if (TrySampleIconColor(icon, out sampled))
                 return sampled;
 
+            // Unknown or future game resources use a stable, deterministic
+            // tint keyed by their exact game item ID, not an invented ore name.
             uint hash = 2166136261u;
             foreach (char character in id)
             {
