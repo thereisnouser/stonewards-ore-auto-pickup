@@ -1,15 +1,15 @@
-# QA checklist — Ore Auto Pickup 0.2.1 (development)
+# QA checklist — Ore Auto Pickup 0.2.2 (development)
 
 Test only with the r2modman profile **stonewards-ore-auto-pickup** and keep the game log.
 
 ## Build and UI
 
 1. Build the source using `build-and-install.ps1`; confirm **0 errors**, and SHA256 matches the installed DLL.
-2. Launch via **Start modded**; log must contain `Ore Auto Pickup v0.2.1 initialized`.
+2. Launch via **Start modded**; log must contain `Ore Auto Pickup v0.2.2 initialized`.
 3. Press **F10**: check the main window at 1920×1080 and 2560×1440. Check that the game stops character input and restores cursor controls when closing.
 4. Press **CONFIGURE ORES**. Verify it opens a **separate window** with real item icons, tinted names, search, and individual toggles.
 5. Confirm `Jersey10-Regular` (or fallback `Jersey10-Regular2`) appears in the active log after opening settings.
-6. Check ore icons and color approximation, including a resource name whose ID is not on the predefined color list.
+6. Mine at least three different ores and verify the center-screen text and ore-selection labels have distinct, material-appropriate colors (not just identical rarity colors). Check the BepInEx log for `Ore UI color: ITEM_ID #RRGGBB` lines; report any identical colors with resource IDs. Include a resource whose name is not in the built-in palette.
 7. Check **ENABLE ALL**, **DISABLE ALL**, searching, scrolling and returning to the main window. Restart to verify selection persists.
 
 ## Correctness / quantities (highest priority)
