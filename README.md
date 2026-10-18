@@ -2,16 +2,22 @@
 
 A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
 
-## Features (development 0.2.1)
+## Features (development 0.2.2)
 
 - Press **F10** to open the main settings window.
 - Choose **CONFIGURE ORES** to open a separate resource selection window.
-- Each resource displays the game's **actual item icon**, localized name (when available), an approximate material-colored label, and an individual **PICK UP / IGNORE** toggle.
+- Each resource displays the game's **actual item icon**, localized name (when available), a material-colored label, and an individual **PICK UP / IGNORE** toggle.
 - Search resources by name or item ID, plus **ENABLE ALL / DISABLE ALL** actions.
 - Uses Stonewards' own `Jersey10-Regular` UI font when loaded, falling back to `Jersey10-Regular2`.
 - Adjust auto-pickup radius from **1.0 m to 4.0 m** and rebind F10.
 - Selection and key preferences persist in `BepInEx/config/community.stonewards.oreautopickup.cfg`.
 - Only automatically collects unowned mined-resource world pickups; leaves dropped player items and other loot alone.
+
+## Resource-specific colors (0.2.2)
+
+The pickup notification and ore-selection window now both use a distinct tint for each material. Common resource IDs get hand-picked, easy-to-distinguish colors (iron: steel blue-gray; copper: orange; gold: yellow, etc.), irrespective of rarity. For other IDs, the mod attempts to sample a readable sprite's dominant visible color, and otherwise assigns a stable, bright color based on the item ID. Multiple common-rarity ores no longer automatically share a single label color.
+
+Both UI paths use these same tints, and pickup notifications apply their tint via `GUI.contentColor` to avoid white text from a Unity skin overriding the color. On ore discovery, the active BepInEx log includes lines like `Ore UI color: ITEM_ID #RRGGBB` for verification. No game assets are modified.
 
 ## Pickup notifications and inventory quantities
 
