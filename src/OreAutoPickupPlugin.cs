@@ -15,11 +15,14 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.0";
+        public const string PluginVersion = "0.2.1";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
         private const float RetryDelay = 7f;
+        private const float AckTimeout = 6f;
+        private const float ToastDuration = 1.8f;
+        private const int MaxVisibleToasts = 4;
         private const int MaxPickupRequestsPerScan = 8;
         private const float WindowWidth = 516f;
         private const float WindowHeight = 390f;
@@ -35,6 +38,21 @@ namespace StonewardsOreAutoPickup
         private static readonly Color MutedText = new Color(0.69f, 0.72f, 0.76f, 1f);
         private static readonly Color Divider = new Color(0.71f, 0.63f, 0.48f, 0.42f);
 
+        private sealed class PendingPickup
+        {
+            public int LastCount;
+            public float Deadline;
+        }
+
+        private sealed class PickupToast
+        {
+            public string Id;
+            public string Name;
+            public int Amount;
+            public Color Tint;
+            public float Expires;
+        }
+
         private sealed class OreOption
         {
             public string Id;
@@ -48,6 +66,13 @@ namespace StonewardsOreAutoPickup
             new Dictionary<string, OreOption>(StringComparer.Ordinal);
         private readonly List<OreOption> _orderedOres = new List<OreOption>();
         private readonly Dictionary<int, float> _recentAttempts = new Dictionary<int, float>();
+        private readonly Dictionary<string, PendingPickup> _pendingPickups =
+            new Dictionary<string, PendingPickup>(StringComparer.Ordinal);
+        private readonly List<PickupToast> _pickupToasts = new List<PickupToast>();
+        private static readonly MethodInfo InventoryGetItemCountMethod =
+            typeof(InventorySystem).GetMethod("GetItemCount", AllInstance, null,
+                new[] { typeof(string) }, null);
+        private bool _warnedAboutInventoryCount;
         private static readonly BindingFlags AllInstance = BindingFlags.Instance |
             BindingFlags.Public | BindingFlags.NonPublic;
         private static readonly FieldInfo ResourceClustersField =
@@ -81,6 +106,7 @@ namespace StonewardsOreAutoPickup
         private GUIStyle _miniStyle;
         private GUIStyle _searchStyle;
         private GUIStyle _smallGoldStyle;
+        private GUIStyle _pickupToastStyle;
         private Font _nativeUiFont;
         private float _nextFontLookup;
         private const float OreWindowWidth = 572f;
@@ -128,6 +154,9 @@ namespace StonewardsOreAutoPickup
                     Cursor.visible = true;
                 }
             }
+
+            // Show only quantities confirmed by the local player's inventory.
+            CheckPendingPickupCounts();
 
             if (Time.unscaledTime >= _nextDiscovery)
             {
@@ -273,6 +302,10 @@ namespace StonewardsOreAutoPickup
                         continue;
                     _recentAttempts[instanceId] = Time.unscaledTime + RetryDelay;
 
+                    // Take an inventory snapshot BEFORE asking the server for a pickup.
+                    // Notification is emitted later, only when inventory count rises.
+                    TrackRequestedPickup(player, item.itemID);
+
                     // Native command: the host remains authoritative about inventory and pickup lifetime.
                     // NEVER use CmdForcePickupItem (it can create items without consuming a world drop).
                     // Route through the same command as a regular manual pickup. Unlike the
@@ -306,6 +339,161 @@ namespace StonewardsOreAutoPickup
                         expired.Add(entry.Key);
                 foreach (var id in expired)
                     _recentAttempts.Remove(id);
+            }
+        }
+
+
+        private int ReadInventoryCount(FirstPersonController player, string itemId)
+        {
+            if (player == null || player.InventorySystem == null ||
+                InventoryGetItemCountMethod == null)
+            {
+                if (InventoryGetItemCountMethod == null && !_warnedAboutInventoryCount)
+                {
+                    _warnedAboutInventoryCount = true;
+                    Logger.LogWarning("InventorySystem.GetItemCount(string) unavailable. Pickup notifications will not guess amounts.");
+                }
+                return -1;
+            }
+            try
+            {
+                return Convert.ToInt32(InventoryGetItemCountMethod.Invoke(
+                    player.InventorySystem, new object[] { itemId }));
+            }
+            catch (Exception ex)
+            {
+                if (!_warnedAboutInventoryCount)
+                {
+                    _warnedAboutInventoryCount = true;
+                    Logger.LogWarning("Unable to read confirmed inventory counts: " + ex.Message);
+                }
+                return -1;
+            }
+        }
+
+        private void TrackRequestedPickup(FirstPersonController player, string id)
+        {
+            int count = ReadInventoryCount(player, id);
+            if (count < 0)
+                return;
+            if (_pendingPickups.TryGetValue(id, out var existing))
+            {
+                // Keep the baseline when several ground stacks of the same
+                // material are requested before the network response arrives.
+                existing.Deadline = Time.unscaledTime + AckTimeout;
+            }
+            else
+            {
+                _pendingPickups.Add(id, new PendingPickup
+                {
+                    LastCount = count,
+                    Deadline = Time.unscaledTime + AckTimeout
+                });
+            }
+        }
+
+        private void CheckPendingPickupCounts()
+        {
+            if (_pendingPickups.Count == 0)
+                return;
+            var player = LocalPlayer();
+            if (player == null || !NetworkClient.active)
+            {
+                _pendingPickups.Clear();
+                return;
+            }
+
+            var completed = new List<string>();
+            foreach (var pair in _pendingPickups)
+            {
+                var pending = pair.Value;
+                if (Time.unscaledTime > pending.Deadline)
+                {
+                    completed.Add(pair.Key);
+                    continue;
+                }
+
+                int current = ReadInventoryCount(player, pair.Key);
+                if (current < 0)
+                    continue;
+
+                int received = current - pending.LastCount;
+                // Do not show the world's pickup size or a guessed amount:
+                // synced inventory growth is our only numeric source of truth.
+                if (received > 0 && _oresById.TryGetValue(pair.Key, out var ore))
+                {
+                    PushPickupToast(ore, received);
+                    Logger.LogDebug("Confirmed pickup: " + pair.Key +
+                        " +" + received + " (" + pending.LastCount + " -> " + current + ")");
+                }
+                pending.LastCount = current;
+            }
+            foreach (var id in completed)
+                _pendingPickups.Remove(id);
+        }
+
+        private void PushPickupToast(OreOption ore, int received)
+        {
+            // Merge very recent notifications of the same ore into one line.
+            foreach (var toast in _pickupToasts)
+            {
+                if (toast.Id == ore.Id && toast.Expires - Time.unscaledTime > 0.65f)
+                {
+                    toast.Amount += received;
+                    toast.Expires = Time.unscaledTime + ToastDuration;
+                    return;
+                }
+            }
+            _pickupToasts.Add(new PickupToast
+            {
+                Id = ore.Id,
+                Name = ore.Name,
+                Tint = ore.Tint,
+                Amount = received,
+                Expires = Time.unscaledTime + ToastDuration
+            });
+            while (_pickupToasts.Count > MaxVisibleToasts)
+                _pickupToasts.RemoveAt(0);
+        }
+
+        private void DrawPickupToasts()
+        {
+            for (int i = _pickupToasts.Count - 1; i >= 0; i--)
+                if (Time.unscaledTime >= _pickupToasts[i].Expires)
+                    _pickupToasts.RemoveAt(i);
+            if (_pickupToasts.Count == 0)
+                return;
+
+            EnsureStyles();
+            var oldDepth = GUI.depth;
+            var oldMatrix = GUI.matrix;
+            var oldColor = GUI.color;
+            var oldContentColor = GUI.contentColor;
+            try
+            {
+                GUI.depth = -540;
+                float scale = Mathf.Clamp(Screen.height / 1080f, 0.8f, 1.5f);
+                GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
+                float center = Screen.width / scale * 0.5f;
+                float top = Screen.height / scale * 0.322f;
+                for (int i = 0; i < _pickupToasts.Count; i++)
+                {
+                    var toast = _pickupToasts[i];
+                    float timeLeft = toast.Expires - Time.unscaledTime;
+                    float alpha = Mathf.Clamp01(timeLeft / 0.42f);
+                    GUI.contentColor = new Color(1f, 1f, 1f, alpha);
+                    _pickupToastStyle.normal.textColor = toast.Tint;
+                    GUI.Label(new Rect(center - 190f, top + i * 37f, 380f, 36f),
+                        "+" + toast.Amount + " " + toast.Name.ToUpperInvariant(),
+                        _pickupToastStyle);
+                }
+            }
+            finally
+            {
+                GUI.depth = oldDepth;
+                GUI.matrix = oldMatrix;
+                GUI.color = oldColor;
+                GUI.contentColor = oldContentColor;
             }
         }
 
@@ -422,6 +610,7 @@ namespace StonewardsOreAutoPickup
                 _mutedStyle = MakeStyle(15, MutedText, TextAnchor.MiddleLeft);
                 _mutedStyle.wordWrap = true;
                 _smallGoldStyle = MakeStyle(16, Gold, TextAnchor.MiddleLeft);
+                _pickupToastStyle = MakeStyle(26, Text, TextAnchor.MiddleCenter);
                 _miniStyle = MakeStyle(14, MutedText, TextAnchor.MiddleRight);
                 _searchStyle = new GUIStyle(GUI.skin.textField)
                 {
@@ -480,7 +669,7 @@ namespace StonewardsOreAutoPickup
                 return;
             foreach (var style in new[] {
                 _titleStyle, _labelStyle, _mutedStyle, _smallGoldStyle,
-                _miniStyle, _searchStyle, _buttonStyle })
+                _miniStyle, _searchStyle, _buttonStyle, _pickupToastStyle })
             {
                 style.font = _nativeUiFont;
                 style.fontStyle = FontStyle.Normal;
@@ -490,7 +679,11 @@ namespace StonewardsOreAutoPickup
 
         private void OnGUI()
         {
-            if (!_menuOpen || Event.current == null)
+            if (Event.current == null)
+                return;
+            if (Event.current.type == EventType.Repaint)
+                DrawPickupToasts();
+            if (!_menuOpen)
                 return;
             EnsureStyles();
             var oldMatrix = GUI.matrix;
