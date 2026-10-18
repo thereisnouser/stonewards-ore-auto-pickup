@@ -15,7 +15,7 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.6";
+        public const string PluginVersion = "0.1.0";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
