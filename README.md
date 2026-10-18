@@ -1,36 +1,42 @@
 # Stonewards Ore Auto Pickup
 
-A **client-side BepInEx 5** mod for Stonewards that automatically picks up selected, nearby *mined resources* using Stonewards' own `CmdAutoPickupItem` network command.
+A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
 
-## Features
+## Features (development 0.2.0)
 
-- Open a compact Stonewards-inspired in-game settings screen with **F10**.
-- Dynamically discovers actual ore/resource item IDs from loaded `DigMatterProfileSO.resourceClusters` data. No hard-coded, potentially fictitious ore names.
-- Toggle each mined resource individually, or enable/disable all.
-- Configure collection radius (1.0–4.0 meters) and rebind the settings shortcut.
-- Saves settings in the active profile at `BepInEx/config/community.stonewards.oreautopickup.cfg`.
-- Uses the existing networked pickup command. It does **not** mint inventory items, destroy pickups locally, change saves, or scoop up teammates' items from arbitrary distances.
+- Press **F10** to open the main settings window.
+- Choose **CONFIGURE ORES** to open a separate resource selection window.
+- Each resource displays the game's **actual item icon**, localized name (when available), an approximate material-colored label, and an individual **PICK UP / IGNORE** toggle.
+- Search resources by name or item ID, plus **ENABLE ALL / DISABLE ALL** actions.
+- Uses Stonewards' own `Jersey10-Regular` UI font when loaded, falling back to `Jersey10-Regular2`.
+- Adjust auto-pickup radius from **1.0 m to 4.0 m** and rebind F10.
+- Selection and key preferences persist in `BepInEx/config/community.stonewards.oreautopickup.cfg`.
+- Only automatically collects unowned mined-resource world pickups; leaves dropped player items and other loot alone.
 
-## Build and install
+## About the quantity discrepancy
 
-Requires the .NET SDK, Stonewards game files and BepInEx 5 in your active profile.
+Earlier builds sent the game's `CmdAutoPickupItem` command, which players reported could show a number on screen that did not match the amount received. In **0.2.0**, the plugin uses the normal `CmdPickupItem` path instead, which should preserve vanilla stack handling, and rate-limits attempts per world object. **This is a proposed fix, not yet confirmed in a game session.**
+
+If this route behaves differently on a particular host or client, the advanced setting `UseManualPickupRoute = false` restores the older `CmdAutoPickupItem` approach. The mod never calls `CmdForcePickupItem`, never directly increases inventory counts and never destroys world pickups locally.
+
+## Build & install
+
+Requires a local **.NET SDK**, Stonewards game assemblies and BepInEx 5 installed in the matching r2modman profile.
+
+Run the following from the cloned repository in PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\build-and-install.ps1 `
   -GameDir "F:\Steam\steamapps\common\Stonewards" `
-  -ProfileDir "C:\Users\user\AppData\Roaming\r2modmanPlus-local\Stonewards\profiles\sw-test-bell-control"
+  -ProfileDir "C:\Users\user\AppData\Roaming\r2modmanPlus-local\Stonewards\profiles\stonewards-ore-auto-pickup"
 ```
 
-When no `-ProfileDir` is supplied, the plugin is installed into the game directory (provided BepInEx is present there).
+Launch **Start modded** using the same profile. The resource list is loaded dynamically from `DigMatterProfileSO.resourceClusters` when the game's level content is available. Open **F10 → CONFIGURE ORES** to edit selection. You can also edit the configuration using r2modman's Config editor.
 
-Launch the profile via **Start modded**, load into a playable level and press **F10**. The ore list populates from the game's loaded level data. The mod avoids attempting pickups when the inventory or native menus are open, the player is dead, or networking is unavailable.
+## Current status
 
-## Status
+**0.2.0 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
 
-**Source prototype (v0.1.0)**. The source is based on independently observed Stonewards 0.2.x method signatures, but has **not been compiled against a full local game install or runtime-tested** here. Verify it on a separate test profile before using it on your main save. Please share build logs and observed pickup behavior to finalize compatibility.
+## Feedback
 
-## Technical choices
-
-Ore discovery reads `DigMatterProfileSO.resourceClusters` (the resources mining can actually produce), and filters out scrap items. The plugin then calls `FirstPersonController.CmdAutoPickupItem(player, pickable)` only for selected `PickableItem` objects that are currently in range. It never calls `CmdForcePickupItem`, which would bypass normal world-pickup flow.
-
-See `docs/TEST_PLAN.md` for checks before a public release.
+Please include the game version, host/client role, **on-screen pickup number vs actual inventory increase**, and the active profile's `BepInEx/LogOutput.log` if reporting a bug.
