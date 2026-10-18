@@ -1,11 +1,11 @@
-# QA checklist — Ore Auto Pickup 0.2.0 (development)
+# QA checklist — Ore Auto Pickup 0.2.1 (development)
 
 Test only with the r2modman profile **stonewards-ore-auto-pickup** and keep the game log.
 
 ## Build and UI
 
 1. Build the source using `build-and-install.ps1`; confirm **0 errors**, and SHA256 matches the installed DLL.
-2. Launch via **Start modded**; log must contain `Ore Auto Pickup v0.2.0 initialized`.
+2. Launch via **Start modded**; log must contain `Ore Auto Pickup v0.2.1 initialized`.
 3. Press **F10**: check the main window at 1920×1080 and 2560×1440. Check that the game stops character input and restores cursor controls when closing.
 4. Press **CONFIGURE ORES**. Verify it opens a **separate window** with real item icons, tinted names, search, and individual toggles.
 5. Confirm `Jersey10-Regular` (or fallback `Jersey10-Regular2`) appears in the active log after opening settings.
@@ -15,12 +15,13 @@ Test only with the r2modman profile **stonewards-ore-auto-pickup** and keep the 
 ## Correctness / quantities (highest priority)
 
 8. With one enabled resource and all others disabled, mine the selected one. Record **before/after inventory count**, **number on the pickup notification**, and **amount shown in the world stack if visible**.
-9. Repeat for stacks of multiple units, partial inventory stacks, and cases with resource bonuses / mining effects. Notification increase must match actual inventory increase.
-10. Mine a disabled resource and verify it remains on the ground; manual pickup must still work.
-11. Fill inventory and walk into selected drops. No world object should disappear without corresponding inventory space, and no repeat-pickup duplication should occur.
-12. Test standing near ore over 20 seconds to confirm one item is never credited repeatedly.
-13. Repeat as **host and non-host client**. With teammates nearby, make sure no dropped teammate-owned item is taken automatically.
-14. If manual route fails in your session, change `[Advanced] UseManualPickupRoute` to `false` and compare. Include logs and measured deltas when reporting; do not release publicly with an unconfirmed count discrepancy.
+9. Verify the center-screen colored **+N ORE** popup is visible again. It must use the game's Jersey10 font, show the selected ore name and match the exact inventory delta. If no ore was added (inventory full), there must be no popup. Repeat for stacks of multiple units, partial inventory stacks, and cases with resource bonuses / mining effects. Notification increase must match actual inventory increase.
+10. Collect two world stacks of the same material in quick succession; the toast should merge confirmed additions without double counting.
+11. Mine a disabled resource and verify it remains on the ground; manual pickup must still work.
+12. Fill inventory and walk into selected drops. No world object should disappear without corresponding inventory space, and no repeat-pickup duplication should occur.
+13. Test standing near ore over 20 seconds to confirm one item is never credited repeatedly.
+14. Repeat as **host and non-host client**. With teammates nearby, make sure no dropped teammate-owned item is taken automatically.
+15. If manual route fails in your session, change `[Advanced] UseManualPickupRoute` to `false` and compare. Include logs and measured deltas when reporting; do not release publicly with an unconfirmed count discrepancy.
 
 ## Log diagnostics
 
