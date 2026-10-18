@@ -1,0 +1,9 @@
+{
+  "name": "OreAutoPickup",
+  "version_number": "0.1.0",
+  "website_url": "https://github.com/thereisnouser/stonewards-ore-auto-pickup",
+  "description": "Automatically collect selected Stonewards ores with per-resource filters, game icons, and clear pickup notifications.",
+  "dependencies": [
+    "BepInEx-BepInExPack-5.4.2305"
+  ]
+}

@@ -1,89 +1,100 @@
 # Stonewards Ore Auto Pickup
 
-A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
+**Automatically collect selected mined resources without stopping to pick up every piece of ore.** Choose exactly what to collect with a compact in-game menu.
 
-## Features (development 0.2.6)
+## ✨ Features
 
-- Press **F10** to open the main settings window.
-- Choose **CONFIGURE ORES** to open a separate resource selection window.
-- Each resource displays the game's **actual item icon**, localized name (when available), a material-colored label, and an individual **PICK UP / IGNORE** toggle.
-- Search resources by name or item ID, plus **ENABLE ALL / DISABLE ALL** actions.
-- **Stone is ignored by default** on both known maps (`STONE`, `STONE_MAP_2`); all other discovered resource IDs default to auto-pickup ON. The selection remains configurable per resource.
-- Uses Stonewards' own `Jersey10-Regular` UI font when loaded, falling back to `Jersey10-Regular2`.
-- Adjust auto-pickup radius from **1.0 m to 4.0 m** and rebind F10.
-- Selection and key preferences persist in `BepInEx/config/community.stonewards.oreautopickup.cfg`.
-- Only automatically collects unowned mined-resource world pickups; leaves dropped player items and other loot alone.
+- **Selective collection** — automatically pick up nearby mined resources you enable; leave unwanted materials on the ground.
+- **Resource-specific settings** — choose ores individually in a separate F10 window with their in-game icons, search, and Enable All / Disable All controls.
+- **Stone excluded by default** — both known Stone item IDs start disabled; other discovered resources start enabled. Your choices are saved.
+- **Readable pickup feedback** — displays the actual increase in your inventory with colored text and the game's UI font.
+- **Adjustable controls** — set the collection radius (1–4 m, default 2.5 m) and rebind the settings shortcut.
+- **Own-drop protection** — tries to avoid automatically collecting stacks you deliberately drop from your inventory.
 
-## Real resource IDs and readable colors (0.2.4)
+## 🎮 How to use
 
-Ore discovery and selection are always dynamic: the source of truth is the game's own `ItemDataSO` referenced in `DigMatterProfileSO.resourceClusters`. Only material colors are explicitly mapped, using **nine exact IDs observed in a player's Stonewards 0.2.3 BepInEx log** across the first two maps:
+1. Start Stonewards with your modded profile and join a game.
+2. Mining nearby selected resources automatically sends the normal in-game pickup request.
+3. Press **F10** to open the settings menu, then select **CONFIGURE ORES** to choose which resources to collect.
+4. To collect a disabled resource, pick it up manually or enable it in the filter.
 
-| In-game item ID | In-game name | Color |
-|---|---|---|
-| `STONE` | Stone | Warm gray `#BEBEB2` |
-| `IRON` | Iron | Steel blue-gray `#AAC2CE` |
-| `DIAMOND` | Diamond | Icy cyan `#7BDFF1` |
-| `GOLD` | Gold | Gold `#FFCD56` |
-| `EMERALD` | Emerald | Green `#57DB80` |
-| `STONE_MAP_2` | Stone | Warm gray `#BEBEB2` |
-| `IRON_MAP_2` | Copper | Copper orange `#EB8E56` |
-| `GOLD_MAP_2` | Platinum | Cool platinum `#D8E1EC` |
-| `EMERALD_MAP_2` | Ruby | Ruby red `#F45D73` |
+The menu shortcut can be changed in settings. Existing resource selections are stored in your active profile.
 
-**Technical IDs are not material names.** For instance `IRON_MAP_2` is Copper, not Iron. The colors above are carefully chosen approximations for clear HUD text, **not measured RGB values from game icon textures**.
+## ⚙️ Configuration
 
-Unknown/future resource IDs are still supported: use readable icon-derived tints when possible, otherwise stable per-ID colors. No assumed resources are added to the filter.
+Settings are stored in `BepInEx/config/community.stonewards.oreautopickup.cfg` within the active r2modman profile.
 
-To check what your particular game has loaded, search `BepInEx/LogOutput.log` in the active profile for `Discovered real mined resource`. Resource logs include ID, localized name, sprite name, rarity and assigned tint.
+| Option | Default | Effect |
+| --- | --- | --- |
+| Enabled | On | Master toggle for automatic collection |
+| PickupRadius | 2.5 m | Collection radius, adjustable from 1 to 4 m |
+| ToggleSettings | F10 | In-game configuration shortcut |
+| `STONE`, `STONE_MAP_2` | Off | Ignore Stone on the first two maps |
+| Other discovered ores | On | Collect automatically unless disabled |
+| UseManualPickupRoute | On | Uses the game's regular pickup command |
 
-## Default ore selection (0.2.6)
+Existing profiles upgrading from earlier development builds disable Stone once per known Stone ID. Subsequent changes made in F10 remain saved.
 
-Confirmed Stonewards map 1 and map 2 IDs:
-- **Off by default:** `STONE`, `STONE_MAP_2` (both display as Stone).
-- **On by default:** `IRON`, `DIAMOND`, `GOLD`, `EMERALD`, `IRON_MAP_2` (Copper), `GOLD_MAP_2` (Platinum), `EMERALD_MAP_2` (Ruby).
+## 📦 Installation
 
-The plugin uses exact game IDs, not ambiguous prefixes. Existing profiles had Stone saved as enabled by older versions; a **one-time per-ID migration** turns Stone off when each resource is first discovered after upgrading. It does not touch selections for other materials. After this migration, you can manually re-enable Stone using F10 → CONFIGURE ORES, and the choice persists across future restarts. Migration settings are stored in the same BepInEx profile config.
+### Mod manager
 
-## Dropping ore without collecting it again (0.2.5)
+After the package is published, install **OreAutoPickup** with **r2modman** or another compatible Thunderstore manager and launch the game using that profile.
 
-**Ore you intentionally drop from your inventory is no longer a valid auto-pickup target.** A small Harmony hook watches the game's own `FirstPersonController.CmdReleaseItem` command for the local player. It records the specific resource and drop position, then matches the newly spawned world pickup against objects that were already on the ground. The resulting pickup is excluded from this mod's auto-pickup until it despawns.
+Until then, build from source using the instructions below.
 
-- Fresh ore mined nearby remains eligible for automatic collection.
-- Manual pickup still works when you choose to retrieve your dropped ore.
-- A temporary exclusion zone around the drop position guards against delayed network spawning. If the pickup cannot be uniquely identified, that fallback remains while you stay near the drop, and clears when you move away.
-- Protection is client-side. It does **not** change host or teammate behavior, world drops, inventory numbers, or save data.
-- Logging includes `Own-drop guard enabled`, `Ore dropped manually`, and `Excluding own dropped` to help diagnose a missed drop.
+## 🔧 Compatibility
 
-Requires BepInEx's bundled `0Harmony.dll` (already provided by typical BepInEx 5 installs). This behavior is not yet runtime-tested on the current game version; see the test plan.
+- **Game:** Stonewards; mined-resource IDs and icons were checked against player logs from game version 0.2.3. Other updates are not verified.
+- **Mod loader:** BepInEx 5.
+- **Multiplayer:** Each player who wants automatic collection installs the mod locally. Pickup requests use Stonewards' existing network commands. Cooperative drop handling has not been fully verified.
 
-## Pickup notifications and inventory quantities
+## ⚠️ Known limitations
 
-**0.2.1:** Restores the on-screen `+N IRON`-style notification that disappeared when the pickup command changed in 0.2.0. The new notification uses the game's `Jersey10-Regular` font, approximate resource-specific colors, and the **confirmed inventory count delta** rather than the ground-stack quantity or amount requested.
+- **Other players' dropped ore** may be collected automatically when it appears as an ordinary world pickup. Protection for your **own** dropped stacks is best-effort and still needs testing after the latest changes.
+- The mod does not add resources to the inventory directly; pickups remain subject to the game's normal permissions and inventory limits.
+- Ores available in the selection menu depend on which game resource profiles have loaded.
 
-The mod snapshots `InventorySystem.GetItemCount(itemID)` before requesting a pickup, waits for the networked inventory to increase, then displays the actual increment. If the inventory does not increase, **no notification is shown**. Repeated nearby collections of the same ore are merged into a single floating message. This logic uses no forged inventory changes.
+## 🛠️ Development
 
-The manual pickup route (`CmdPickupItem`) remains the default. If it does not work on a particular client or server, `[Advanced] UseManualPickupRoute = false` restores the previous auto-pickup route; note that its original in-game notification may then also appear.
+### Requirements
 
-**This behavior requires in-game verification.** We have not yet validated the exact inventory sync timing or compile/runtime compatibility after these changes.
+- .NET SDK with `netstandard2.1` support.
+- Stonewards installed locally.
+- BepInEx 5 available in the game installation or the active mod-manager profile.
+- Windows PowerShell.
 
-## Build & install
+### Building
 
-Requires a local **.NET SDK**, Stonewards game assemblies and BepInEx 5 installed in the matching r2modman profile.
-
-Run the following from the cloned repository in PowerShell:
+From the cloned repository:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\build-and-install.ps1 `
-  -GameDir "F:\Steam\steamapps\common\Stonewards" `
-  -ProfileDir "C:\Users\user\AppData\Roaming\r2modmanPlus-local\Stonewards\profiles\stonewards-ore-auto-pickup"
+$GameDir = "PATH_TO_STONEWARDS"
+$ProfileDir = Join-Path $env:APPDATA "r2modmanPlus-local\Stonewards\profiles\stonewards-ore-auto-pickup"
+
+.\build-and-install.ps1 -GameDir $GameDir -ProfileDir $ProfileDir
 ```
 
-Launch **Start modded** using the same profile. The resource list is loaded dynamically from `DigMatterProfileSO.resourceClusters` when the game's level content is available. Open **F10 → CONFIGURE ORES** to edit selection. You can also edit the configuration using r2modman's Config editor.
+This builds the project and installs the plugin DLL in that profile.
 
-## Current status
+### Release packaging
 
-**0.2.6 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
+Provide a **256 × 256 PNG** at `thunderstore/icon.png`, then run:
 
-## Feedback
+```powershell
+.\package-thunderstore.ps1 -GameDir $GameDir -ProfileDir $ProfileDir
+```
 
-Please include the game version, host/client role, **on-screen pickup number vs actual inventory increase**, and the active profile's `BepInEx/LogOutput.log` if reporting a bug.
+The packager verifies version consistency, compiles the DLL and checks the Thunderstore ZIP layout before creating `dist/OreAutoPickup-0.1.0.zip`. It deliberately fails if the icon or any required asset is missing.
+
+### Implementation
+
+The plugin discovers actual resource types through Stonewards' loaded item and mining profile data. It requests normal networked pickup of supported world items, checks local inventory changes for notifications, and uses a Harmony hook for best-effort identification of locally dropped stacks.
+
+## 🔗 Links
+
+[Report an issue](https://github.com/thereisnouser/stonewards-ore-auto-pickup/issues) · [Changelog](thunderstore/CHANGELOG.md)
+
+---
+
+*Made by thereisnouser*
