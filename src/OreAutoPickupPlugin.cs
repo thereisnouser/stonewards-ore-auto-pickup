@@ -15,11 +15,11 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "0.2.0";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
-        private const float RetryDelay = 2.5f;
+        private const float RetryDelay = 7f;
         private const int MaxPickupRequestsPerScan = 8;
         private const float WindowWidth = 516f;
         private const float WindowHeight = 602f;
@@ -39,6 +39,8 @@ namespace StonewardsOreAutoPickup
         {
             public string Id;
             public string Name;
+            public Sprite Icon;
+            public Color Tint;
             public ConfigEntry<bool> AutoPick;
         }
 
@@ -57,6 +59,7 @@ namespace StonewardsOreAutoPickup
         private ConfigEntry<float> _radius;
         private ConfigEntry<KeyboardShortcut> _settingsKey;
         private bool _menuOpen;
+        private bool _oreWindowOpen;
         private bool _captureShortcut;
         private bool _ownsInputState;
         private InputManager.InputState _returnInputState;
@@ -75,6 +78,10 @@ namespace StonewardsOreAutoPickup
         private GUIStyle _buttonStyle;
         private GUIStyle _miniStyle;
         private GUIStyle _smallGoldStyle;
+        private Font _nativeUiFont;
+        private float _nextFontLookup;
+        private const float OreWindowWidth = 572f;
+        private const float OreWindowHeight = 616f;
 
         private void Awake()
         {
@@ -183,6 +190,8 @@ namespace StonewardsOreAutoPickup
                         {
                             Id = id,
                             Name = name,
+                            Icon = item.itemIcon,
+                            Tint = OreTint(id + " " + name, item.Rarity),
                             AutoPick = Config.Bind("Ores", id, true,
                                 "Automatically collect the mined resource " + name + " (" + id + ").")
                         };
@@ -242,7 +251,7 @@ namespace StonewardsOreAutoPickup
                 var pickups = UnityEngine.Object.FindObjectsOfType<PickableItem>();
                 foreach (var pickup in pickups)
                 {
-                    if (pickup == null || !pickup.isActiveAndEnabled)
+                    if (pickup == null || !pickup.isActiveAndEnabled || pickup.NetworkSyncPlayerID != 0)
                         continue;
                     var item = pickup.ItemDataSO;
                     if (item == null || string.IsNullOrEmpty(item.itemID) ||
@@ -261,7 +270,12 @@ namespace StonewardsOreAutoPickup
 
                     // Native command: the host remains authoritative about inventory and pickup lifetime.
                     // NEVER use CmdForcePickupItem (it can create items without consuming a world drop).
-                    player.CmdAutoPickupItem(player, pickup);
+                    // Route through the same command as a regular manual pickup. Unlike the
+                    // legacy auto-pickup route, this is intended to consume the complete
+                    // world stack with the game's inventory-capacity checks.
+                    player.CmdPickupItem(player, pickup);
+                    Logger.LogDebug("Pickup request: item=" + item.itemID +
+                        ", ground stack=" + pickup.GetItemCount());
                     requested++;
                     if (requested >= MaxPickupRequestsPerScan)
                         break;
@@ -272,10 +286,48 @@ namespace StonewardsOreAutoPickup
                 Logger.LogWarning("Pickup scan failed: " + ex.Message);
             }
 
+            // Prune expired entries, rather than clearing the entire cooldown table
+            // and resending pickup commands for still-present world objects.
             if (Time.unscaledTime > _nextCleanup)
             {
-                _nextCleanup = Time.unscaledTime + 45f;
-                _recentAttempts.Clear();
+                _nextCleanup = Time.unscaledTime + 30f;
+                var expired = new List<int>();
+                foreach (var entry in _recentAttempts)
+                    if (entry.Value + 30f < Time.unscaledTime)
+                        expired.Add(entry.Key);
+                foreach (var id in expired)
+                    _recentAttempts.Remove(id);
+            }
+        }
+
+        private static Color OreTint(string label, Rarity rarity)
+        {
+            // UI labels use a recognizable approximation of the resource icon hue.
+            // Do not use Color32 texture sampling: most in-game sprite atlases are not readable.
+            string name = label.ToLowerInvariant();
+            if (name.Contains("gold") || name.Contains("золот"))
+                return new Color(1f, 0.80f, 0.30f);
+            if (name.Contains("silver") || name.Contains("сереб"))
+                return new Color(0.79f, 0.87f, 0.96f);
+            if (name.Contains("copper") || name.Contains("медн") || name.Contains("медь"))
+                return new Color(0.98f, 0.60f, 0.39f);
+            if (name.Contains("iron") || name.Contains("желез"))
+                return new Color(0.71f, 0.79f, 0.83f);
+            if (name.Contains("platinum") || name.Contains("платин"))
+                return new Color(0.72f, 0.93f, 0.96f);
+            if (name.Contains("coal") || name.Contains("угол") || name.Contains("уголь"))
+                return new Color(0.72f, 0.71f, 0.70f);
+            if (name.Contains("stone") || name.Contains("камен") || name.Contains("камень"))
+                return new Color(0.76f, 0.75f, 0.67f);
+            if (name.Contains("crystal") || name.Contains("кристалл"))
+                return new Color(0.75f, 0.65f, 0.97f);
+            switch (rarity)
+            {
+                case Rarity.UNCOMMON: return new Color(0.59f, 0.88f, 0.48f);
+                case Rarity.RARE: return new Color(0.55f, 0.85f, 0.98f);
+                case Rarity.EPIC: return new Color(0.87f, 0.60f, 0.96f);
+                case Rarity.LEGENDARY: return new Color(1f, 0.73f, 0.35f);
+                default: return new Color(0.89f, 0.87f, 0.80f);
             }
         }
 
@@ -292,6 +344,7 @@ namespace StonewardsOreAutoPickup
             _previousCursorLock = Cursor.lockState;
             _previousCursorVisible = Cursor.visible;
             _menuOpen = true;
+            _oreWindowOpen = false;
             _ownsInputState = true;
             _captureShortcut = false;
             _notice = "";
@@ -306,6 +359,7 @@ namespace StonewardsOreAutoPickup
             if (!_menuOpen)
                 return;
             _menuOpen = false;
+            _oreWindowOpen = false;
             _captureShortcut = false;
             var input = InputManager.Instance;
             if (_ownsInputState && input != null &&
