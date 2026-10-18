@@ -15,7 +15,7 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.1";
+        public const string PluginVersion = "0.2.2";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
@@ -226,12 +226,14 @@ namespace StonewardsOreAutoPickup
                             Id = id,
                             Name = name,
                             Icon = item.itemIcon,
-                            Tint = OreTint(id + " " + name, item.Rarity),
+                            Tint = OreTint(id + " " + name, item.Rarity, item.itemIcon),
                             AutoPick = Config.Bind("Ores", id, true,
                                 "Automatically collect the mined resource " + name + " (" + id + ").")
                         };
                         _oresById.Add(id, option);
                         _orderedOres.Add(option);
+                        Logger.LogInfo("Ore UI color: " + id + " #" +
+                            ColorUtility.ToHtmlStringRGB(option.Tint));
                         changed = true;
                     }
                 }
@@ -482,8 +484,12 @@ namespace StonewardsOreAutoPickup
                     var toast = _pickupToasts[i];
                     float timeLeft = toast.Expires - Time.unscaledTime;
                     float alpha = Mathf.Clamp01(timeLeft / 0.42f);
-                    GUI.contentColor = new Color(1f, 1f, 1f, alpha);
-                    _pickupToastStyle.normal.textColor = toast.Tint;
+                    // GUI.contentColor directly tints IMGUI text regardless of
+                    // the active skin's normal text color.
+                    GUI.color = Color.white;
+                    _pickupToastStyle.normal.textColor = Color.white;
+                    GUI.contentColor = new Color(toast.Tint.r, toast.Tint.g,
+                        toast.Tint.b, alpha);
                     GUI.Label(new Rect(center - 190f, top + i * 37f, 380f, 36f),
                         "+" + toast.Amount + " " + toast.Name.ToUpperInvariant(),
                         _pickupToastStyle);
@@ -498,34 +504,135 @@ namespace StonewardsOreAutoPickup
             }
         }
 
-        private static Color OreTint(string label, Rarity rarity)
+        /// <summary>
+        /// Prefer the actual item sprite, not item rarity. Most basic ores share
+        /// the same rarity, so the old rarity-based fallback made them identical.
+        /// Texture readback is deliberately CPU-only and one-time per ore; some
+        /// game atlases are non-readable, so safely fall back to material names.
+        /// </summary>
+        private static Color OreTint(string label, Rarity rarity, Sprite icon)
         {
-            // UI labels use a recognizable approximation of the resource icon hue.
-            // Do not use Color32 texture sampling: most in-game sprite atlases are not readable.
-            string name = label.ToLowerInvariant();
+            Color sampled;
+            if (TrySampleIconColor(icon, out sampled))
+                return sampled;
+
+            string name = (label ?? "").ToLowerInvariant();
             if (name.Contains("gold") || name.Contains("золот"))
-                return new Color(1f, 0.80f, 0.30f);
+                return new Color(1f, 0.78f, 0.24f);
             if (name.Contains("silver") || name.Contains("сереб"))
-                return new Color(0.79f, 0.87f, 0.96f);
+                return new Color(0.72f, 0.89f, 1f);
             if (name.Contains("copper") || name.Contains("медн") || name.Contains("медь"))
-                return new Color(0.98f, 0.60f, 0.39f);
+                return new Color(1f, 0.48f, 0.24f);
             if (name.Contains("iron") || name.Contains("желез"))
-                return new Color(0.71f, 0.79f, 0.83f);
+                return new Color(0.65f, 0.77f, 0.90f);
+            if (name.Contains("tin") || name.Contains("олов"))
+                return new Color(0.72f, 0.82f, 0.96f);
             if (name.Contains("platinum") || name.Contains("платин"))
-                return new Color(0.72f, 0.93f, 0.96f);
+                return new Color(0.53f, 0.90f, 0.99f);
+            if (name.Contains("titanium") || name.Contains("титан"))
+                return new Color(0.83f, 0.73f, 0.95f);
+            if (name.Contains("cobalt") || name.Contains("кобальт"))
+                return new Color(0.43f, 0.68f, 1f);
             if (name.Contains("coal") || name.Contains("угол") || name.Contains("уголь"))
-                return new Color(0.72f, 0.71f, 0.70f);
+                return new Color(0.65f, 0.69f, 0.75f);
             if (name.Contains("stone") || name.Contains("камен") || name.Contains("камень"))
-                return new Color(0.76f, 0.75f, 0.67f);
-            if (name.Contains("crystal") || name.Contains("кристалл"))
-                return new Color(0.75f, 0.65f, 0.97f);
-            switch (rarity)
+                return new Color(0.73f, 0.70f, 0.59f);
+            if (name.Contains("sulfur") || name.Contains("sulphur") || name.Contains("сера"))
+                return new Color(1f, 0.93f, 0.30f);
+            if (name.Contains("uranium") || name.Contains("уран"))
+                return new Color(0.55f, 1f, 0.36f);
+            if (name.Contains("emerald") || name.Contains("изумруд"))
+                return new Color(0.36f, 1f, 0.62f);
+            if (name.Contains("ruby") || name.Contains("рубин"))
+                return new Color(1f, 0.39f, 0.46f);
+            if (name.Contains("sapphire") || name.Contains("сапфир"))
+                return new Color(0.43f, 0.67f, 1f);
+            if (name.Contains("amethyst") || name.Contains("аметист") ||
+                name.Contains("crystal") || name.Contains("кристалл"))
+                return new Color(0.79f, 0.50f, 1f);
+            if (name.Contains("diamond") || name.Contains("алмаз"))
+                return new Color(0.50f, 0.95f, 1f);
+            if (name.Contains("obsidian") || name.Contains("обсидиан"))
+                return new Color(0.67f, 0.51f, 0.85f);
+
+            // Unknown game or modded ores must still be visually distinguishable
+            // even when they share a rarity. Stable per-item ID, not Random or
+            // rarity, determines their high-contrast hue across sessions.
+            uint hash = 2166136261u;
+            foreach (char character in name)
             {
-                case Rarity.UNCOMMON: return new Color(0.59f, 0.88f, 0.48f);
-                case Rarity.RARE: return new Color(0.55f, 0.85f, 0.98f);
-                case Rarity.EPIC: return new Color(0.87f, 0.60f, 0.96f);
-                case Rarity.LEGENDARY: return new Color(1f, 0.73f, 0.35f);
-                default: return new Color(0.89f, 0.87f, 0.80f);
+                hash ^= character;
+                hash *= 16777619u;
+            }
+            float hue = (hash % 360u) / 360f;
+            return Color.HSVToRGB(hue, 0.67f, 1f);
+        }
+
+        private static bool TrySampleIconColor(Sprite sprite, out Color tint)
+        {
+            tint = Color.white;
+            if (sprite == null || sprite.texture == null)
+                return false;
+
+            var texture = sprite.texture;
+            if (!texture.isReadable)
+                return false;
+
+            try
+            {
+                var spriteRect = sprite.textureRect;
+                int x0 = Mathf.Clamp(Mathf.FloorToInt(spriteRect.xMin), 0, texture.width - 1);
+                int x1 = Mathf.Clamp(Mathf.CeilToInt(spriteRect.xMax), x0 + 1, texture.width);
+                int y0 = Mathf.Clamp(Mathf.FloorToInt(spriteRect.yMin), 0, texture.height - 1);
+                int y1 = Mathf.Clamp(Mathf.CeilToInt(spriteRect.yMax), y0 + 1, texture.height);
+                int stepX = Mathf.Max(1, (x1 - x0) / 16);
+                int stepY = Mathf.Max(1, (y1 - y0) / 16);
+                float sumR = 0f, sumG = 0f, sumB = 0f, total = 0f;
+
+                for (int y = y0; y < y1; y += stepY)
+                {
+                    for (int x = x0; x < x1; x += stepX)
+                    {
+                        Color pixel = texture.GetPixel(x, y);
+                        if (pixel.a < 0.45f)
+                            continue;
+
+                        float highest = Mathf.Max(pixel.r, Mathf.Max(pixel.g, pixel.b));
+                        float lowest = Mathf.Min(pixel.r, Mathf.Min(pixel.g, pixel.b));
+                        float saturation = highest <= 0f ? 0f : (highest - lowest) / highest;
+                        if (highest < 0.18f)
+                            continue;
+
+                        // Prefer recognizable material colors over black outlines.
+                        float weight = pixel.a * (0.35f + saturation * 1.5f) * highest;
+                        sumR += pixel.r * weight;
+                        sumG += pixel.g * weight;
+                        sumB += pixel.b * weight;
+                        total += weight;
+                    }
+                }
+
+                if (total < 0.001f)
+                    return false;
+
+                var avg = new Color(sumR / total, sumG / total, sumB / total);
+                float hue, sat, value;
+                Color.RGBToHSV(avg, out hue, out sat, out value);
+
+                // Pale/metallic materials should stay silver rather than
+                // acquiring an arbitrary bright hue due to texture noise.
+                if (sat < 0.12f)
+                    tint = new Color(0.78f, 0.83f, 0.89f);
+                else
+                    tint = Color.HSVToRGB(hue, Mathf.Clamp(sat * 1.28f, 0.45f, 0.87f),
+                        Mathf.Clamp(value * 1.24f, 0.85f, 1f));
+                return true;
+            }
+            catch (Exception)
+            {
+                // Packed or otherwise unsupported sprites fall back to their
+                // known resource name or a stable item-ID palette.
+                return false;
             }
         }
 
