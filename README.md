@@ -2,7 +2,7 @@
 
 A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
 
-## Features (development 0.2.2)
+## Features (development 0.2.3)
 
 - Press **F10** to open the main settings window.
 - Choose **CONFIGURE ORES** to open a separate resource selection window.
@@ -13,11 +13,13 @@ A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collec
 - Selection and key preferences persist in `BepInEx/config/community.stonewards.oreautopickup.cfg`.
 - Only automatically collects unowned mined-resource world pickups; leaves dropped player items and other loot alone.
 
-## Resource-specific colors (0.2.2)
+## Resource identities and color (0.2.3)
 
-The pickup notification and ore-selection window now both use a distinct tint for each material. Common resource IDs get hand-picked, easy-to-distinguish colors (iron: steel blue-gray; copper: orange; gold: yellow, etc.), irrespective of rarity. For other IDs, the mod attempts to sample a readable sprite's dominant visible color, and otherwise assigns a stable, bright color based on the item ID. Multiple common-rarity ores no longer automatically share a single label color.
+**No hard-coded ore names.** The plugin discovers only the actual `ItemDataSO` records referenced by loaded `DigMatterProfileSO.resourceClusters`. Any previous examples of materials that were not verified against Stonewards' item database have been removed from the source.
 
-Both UI paths use these same tints, and pickup notifications apply their tint via `GUI.contentColor` to avoid white text from a Unity skin overriding the color. On ore discovery, the active BepInEx log includes lines like `Ore UI color: ITEM_ID #RRGGBB` for verification. No game assets are modified.
+For each discovered item, the plugin uses the game's actual ID, localized display name and icon. The text color is sampled from its icon where the Unity texture is readable; if it is not, a consistent per-ID color is generated without pretending to know the ore's natural color.
+
+To inspect the **real list for your installed game version**, load a playable level with the mod enabled and open the active r2modman profile's `BepInEx/LogOutput.log`. Each discovered ore is logged as `Discovered real mined resource: ID=...; Name=...; Icon=...; Rarity=...; Tint=#...`. Only these actual log entries can support adding a verified, game-specific palette later.
 
 ## Pickup notifications and inventory quantities
 
@@ -51,7 +53,7 @@ Launch **Start modded** using the same profile. The resource list is loaded dyna
 
 ## Current status
 
-**0.2.1 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
+**0.2.3 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
 
 ## Feedback
 
