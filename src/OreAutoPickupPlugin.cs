@@ -57,6 +57,7 @@ namespace StonewardsOreAutoPickup
 
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<float> _radius;
+        private ConfigEntry<bool> _useManualPickup;
         private ConfigEntry<KeyboardShortcut> _settingsKey;
         private bool _menuOpen;
         private bool _oreWindowOpen;
@@ -78,6 +79,7 @@ namespace StonewardsOreAutoPickup
         private GUIStyle _mutedStyle;
         private GUIStyle _buttonStyle;
         private GUIStyle _miniStyle;
+        private GUIStyle _searchStyle;
         private GUIStyle _smallGoldStyle;
         private Font _nativeUiFont;
         private float _nextFontLookup;
@@ -91,6 +93,8 @@ namespace StonewardsOreAutoPickup
             _radius = Config.Bind("General", "PickupRadius", 2.5f,
                 new ConfigDescription("Pickup radius in meters; avoid values larger than native interaction range.",
                     new AcceptableValueRange<float>(1f, 4f)));
+            _useManualPickup = Config.Bind("Advanced", "UseManualPickupRoute", true,
+                "Use the native manual pickup command for full-stack collection. Set false to restore the previous game's auto-pickup command if needed.");
             _settingsKey = Config.Bind("Hotkeys", "ToggleSettings",
                 new KeyboardShortcut(KeyCode.F10),
                 "Open/close the built-in ore selection menu. Ctrl/Shift/Alt combinations are supported.");
@@ -274,9 +278,13 @@ namespace StonewardsOreAutoPickup
                     // Route through the same command as a regular manual pickup. Unlike the
                     // legacy auto-pickup route, this is intended to consume the complete
                     // world stack with the game's inventory-capacity checks.
-                    player.CmdPickupItem(player, pickup);
+                    if (_useManualPickup.Value)
+                        player.CmdPickupItem(player, pickup);
+                    else
+                        player.CmdAutoPickupItem(player, pickup);
                     Logger.LogDebug("Pickup request: item=" + item.itemID +
-                        ", ground stack=" + pickup.GetItemCount());
+                        ", world object=" + pickup.GetInstanceID() +
+                        ", route=" + (_useManualPickup.Value ? "manual" : "auto"));
                     requested++;
                     if (requested >= MaxPickupRequestsPerScan)
                         break;
@@ -415,6 +423,14 @@ namespace StonewardsOreAutoPickup
                 _mutedStyle.wordWrap = true;
                 _smallGoldStyle = MakeStyle(16, Gold, TextAnchor.MiddleLeft);
                 _miniStyle = MakeStyle(14, MutedText, TextAnchor.MiddleRight);
+                _searchStyle = new GUIStyle(GUI.skin.textField)
+                {
+                    fontSize = 18,
+                    fontStyle = FontStyle.Normal,
+                    alignment = TextAnchor.MiddleLeft,
+                    normal = { textColor = Text },
+                    focused = { textColor = Text }
+                };
                 _buttonStyle = new GUIStyle(GUI.skin.button)
                 {
                     fontSize = 18,
@@ -464,7 +480,7 @@ namespace StonewardsOreAutoPickup
                 return;
             foreach (var style in new[] {
                 _titleStyle, _labelStyle, _mutedStyle, _smallGoldStyle,
-                _miniStyle, _buttonStyle })
+                _miniStyle, _searchStyle, _buttonStyle })
             {
                 style.font = _nativeUiFont;
                 style.fontStyle = FontStyle.Normal;
@@ -603,7 +619,7 @@ namespace StonewardsOreAutoPickup
             GUI.Label(new Rect(x + 20f, y + 160f, 91f, 29f), "FIND", _labelStyle);
             Fill(new Rect(x + 99f, y + 161f, OreWindowWidth - 120f, 29f), Slot);
             _oreSearch = GUI.TextField(new Rect(x + 106f, y + 160f, OreWindowWidth - 135f, 31f),
-                _oreSearch, 60, _labelStyle);
+                _oreSearch, 60, _searchStyle);
 
             var visible = new List<OreOption>();
             foreach (var ore in _orderedOres)
