@@ -70,8 +70,9 @@ namespace StonewardsOreAutoPickup
             new Dictionary<string, PendingPickup>(StringComparer.Ordinal);
         private readonly List<PickupToast> _pickupToasts = new List<PickupToast>();
         private static readonly MethodInfo InventoryGetItemCountMethod =
-            typeof(InventorySystem).GetMethod("GetItemCount", AllInstance, null,
-                new[] { typeof(string) }, null);
+            typeof(InventorySystem).GetMethod("GetItemCount",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                null, new[] { typeof(string) }, null);
         private bool _warnedAboutInventoryCount;
         private static readonly BindingFlags AllInstance = BindingFlags.Instance |
             BindingFlags.Public | BindingFlags.NonPublic;
