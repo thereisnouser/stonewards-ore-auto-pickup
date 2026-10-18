@@ -15,7 +15,7 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.5";
+        public const string PluginVersion = "0.2.6";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
@@ -225,16 +225,38 @@ namespace StonewardsOreAutoPickup
                         }
                         catch (Exception) { /* Localization may not be available in the hub. */ }
 
-                        // Each stable game item ID gets its own persisted BepInEx setting.
+                        // Confirmed Stonewards resource IDs from the two maps.
+                        // Stone is excluded by default; every other ore is enabled.
+                        // Match exact IDs because IRON_MAP_2 is actually Copper, etc.
+                        bool isStone = id == "STONE" || id == "STONE_MAP_2";
                         var option = new OreOption
                         {
                             Id = id,
                             Name = name,
                             Icon = item.itemIcon,
                             Tint = OreTint(id, item.itemIcon),
-                            AutoPick = Config.Bind("Ores", id, true,
+                            AutoPick = Config.Bind("Ores", id, !isStone,
                                 "Automatically collect the mined resource " + name + " (" + id + ").")
                         };
+
+                        if (isStone)
+                        {
+                            // Old profiles already contain [Ores] STONE = true.
+                            // BepInEx preserves saved settings over new defaults, so
+                            // apply the requested default once, per exact stone ID.
+                            // Future user changes are respected after this migration.
+                            var migration = Config.Bind("Migrations",
+                                "StoneDefaultDisabled_" + id + "_v026", false,
+                                "Internal one-time migration for the new Stone default.");
+                            if (!migration.Value)
+                            {
+                                option.AutoPick.Value = false;
+                                migration.Value = true;
+                                Logger.LogInfo("Stone default migrated to IGNORE for " + id +
+                                    ". Users may enable it again from CONFIGURE ORES.");
+                            }
+                        }
+
                         _oresById.Add(id, option);
                         _orderedOres.Add(option);
                         Logger.LogInfo("Discovered real mined resource: ID=" + id +
