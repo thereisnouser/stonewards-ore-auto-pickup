@@ -2,7 +2,7 @@
 
 A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
 
-## Features (development 0.2.4)
+## Features (development 0.2.5)
 
 - Press **F10** to open the main settings window.
 - Choose **CONFIGURE ORES** to open a separate resource selection window.
@@ -35,6 +35,18 @@ Unknown/future resource IDs are still supported: use readable icon-derived tints
 
 To check what your particular game has loaded, search `BepInEx/LogOutput.log` in the active profile for `Discovered real mined resource`. Resource logs include ID, localized name, sprite name, rarity and assigned tint.
 
+## Dropping ore without collecting it again (0.2.5)
+
+**Ore you intentionally drop from your inventory is no longer a valid auto-pickup target.** A small Harmony hook watches the game's own `FirstPersonController.CmdReleaseItem` command for the local player. It records the specific resource and drop position, then matches the newly spawned world pickup against objects that were already on the ground. The resulting pickup is excluded from this mod's auto-pickup until it despawns.
+
+- Fresh ore mined nearby remains eligible for automatic collection.
+- Manual pickup still works when you choose to retrieve your dropped ore.
+- A temporary exclusion zone around the drop position guards against delayed network spawning. If the pickup cannot be uniquely identified, that fallback remains while you stay near the drop, and clears when you move away.
+- Protection is client-side. It does **not** change host or teammate behavior, world drops, inventory numbers, or save data.
+- Logging includes `Own-drop guard enabled`, `Ore dropped manually`, and `Excluding own dropped` to help diagnose a missed drop.
+
+Requires BepInEx's bundled `0Harmony.dll` (already provided by typical BepInEx 5 installs). This behavior is not yet runtime-tested on the current game version; see the test plan.
+
 ## Pickup notifications and inventory quantities
 
 **0.2.1:** Restores the on-screen `+N IRON`-style notification that disappeared when the pickup command changed in 0.2.0. The new notification uses the game's `Jersey10-Regular` font, approximate resource-specific colors, and the **confirmed inventory count delta** rather than the ground-stack quantity or amount requested.
@@ -61,7 +73,7 @@ Launch **Start modded** using the same profile. The resource list is loaded dyna
 
 ## Current status
 
-**0.2.4 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
+**0.2.5 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
 
 ## Feedback
 
