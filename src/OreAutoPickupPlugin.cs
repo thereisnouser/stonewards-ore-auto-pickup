@@ -15,7 +15,7 @@ namespace StonewardsOreAutoPickup
     {
         public const string PluginGuid = "community.stonewards.oreautopickup";
         public const string PluginName = "Stonewards Ore Auto Pickup";
-        public const string PluginVersion = "0.2.4";
+        public const string PluginVersion = "0.2.5";
 
         private const float ScanInterval = 0.32f;
         private const float DiscoveryInterval = 4f;
@@ -125,6 +125,8 @@ namespace StonewardsOreAutoPickup
             _settingsKey = Config.Bind("Hotkeys", "ToggleSettings",
                 new KeyboardShortcut(KeyCode.F10),
                 "Open/close the built-in ore selection menu. Ctrl/Shift/Alt combinations are supported.");
+            OwnDroppedOre.IsOreId = id => _oresById.ContainsKey(id);
+            OwnDroppedOre.Install(Logger);
             Logger.LogInfo("Ore Auto Pickup v" + PluginVersion + " initialized.");
         }
 
@@ -155,6 +157,9 @@ namespace StonewardsOreAutoPickup
                     Cursor.visible = true;
                 }
             }
+
+            if (!NetworkClient.active)
+                OwnDroppedOre.Clear();
 
             // Show only quantities confirmed by the local player's inventory.
             CheckPendingPickupCounts();
@@ -289,6 +294,7 @@ namespace StonewardsOreAutoPickup
             try
             {
                 var pickups = UnityEngine.Object.FindObjectsOfType<PickableItem>();
+                OwnDroppedOre.Observe(pickups, playerPosition);
                 foreach (var pickup in pickups)
                 {
                     if (pickup == null || !pickup.isActiveAndEnabled || pickup.NetworkSyncPlayerID != 0)
@@ -297,6 +303,11 @@ namespace StonewardsOreAutoPickup
                     if (item == null || string.IsNullOrEmpty(item.itemID) ||
                         !_oresById.TryGetValue(item.itemID, out var option) ||
                         !option.AutoPick.Value)
+                        continue;
+
+                    // Ignore this specific stack if it was intentionally
+                    // dropped by the local player, while keeping manual pickup.
+                    if (OwnDroppedOre.ShouldIgnore(pickup, item.itemID))
                         continue;
 
                     if ((pickup.transform.position - playerPosition).sqrMagnitude > radiusSquared)
@@ -674,7 +685,11 @@ namespace StonewardsOreAutoPickup
         }
 
         private void OnDisable() { CloseMenu(); }
-        private void OnDestroy() { CloseMenu(); }
+        private void OnDestroy()
+        {
+            CloseMenu();
+            OwnDroppedOre.Uninstall();
+        }
 
         private static void Fill(Rect r, Color color)
         {
