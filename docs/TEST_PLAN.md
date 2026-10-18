@@ -1,12 +1,27 @@
-# Test plan — Ore Auto Pickup 0.1.0
+# QA checklist — Ore Auto Pickup 0.2.0 (development)
 
-1. Launch a separate modded test profile. Verify the `Ore Auto Pickup v0.1.0 initialized.` line in `BepInEx/LogOutput.log`.
-2. Open settings with F10 in a playable level, check cursor unlock, and close with F10/X/Esc. Confirm movement and camera controls restore normally.
-3. Mine two different resource types; ensure each ID appears at most once in the list, with a localized label or stable ID.
-4. Turn all types OFF. Mine and approach drops: nothing should be automatically collected, but vanilla manual pickup should still work.
-5. Turn just one type ON, keeping another OFF. Approach both. Only the selected type should enter inventory, with the correct amount and no duplication on the ground.
-6. Fill inventory: failed pickups should remain on the ground, not disappear or duplicate; disable or clear inventory and retry.
-7. Test as lobby host and as a regular client. Verify pickup does not take another player's ore outside the chosen radius.
-8. Test opening a native menu or respawning while the settings menu is active; no stuck cursor or input state.
-9. Restart and confirm selections, pickup radius, and customized F10 shortcut persist.
-10. Inspect log for `Pickup request failed` or `Ore scan failed` warnings. Do not publish the mod until gameplay behavior has been verified.
+Test only with the r2modman profile **stonewards-ore-auto-pickup** and keep the game log.
+
+## Build and UI
+
+1. Build the source using `build-and-install.ps1`; confirm **0 errors**, and SHA256 matches the installed DLL.
+2. Launch via **Start modded**; log must contain `Ore Auto Pickup v0.2.0 initialized`.
+3. Press **F10**: check the main window at 1920×1080 and 2560×1440. Check that the game stops character input and restores cursor controls when closing.
+4. Press **CONFIGURE ORES**. Verify it opens a **separate window** with real item icons, tinted names, search, and individual toggles.
+5. Confirm `Jersey10-Regular` (or fallback `Jersey10-Regular2`) appears in the active log after opening settings.
+6. Check ore icons and color approximation, including a resource name whose ID is not on the predefined color list.
+7. Check **ENABLE ALL**, **DISABLE ALL**, searching, scrolling and returning to the main window. Restart to verify selection persists.
+
+## Correctness / quantities (highest priority)
+
+8. With one enabled resource and all others disabled, mine the selected one. Record **before/after inventory count**, **number on the pickup notification**, and **amount shown in the world stack if visible**.
+9. Repeat for stacks of multiple units, partial inventory stacks, and cases with resource bonuses / mining effects. Notification increase must match actual inventory increase.
+10. Mine a disabled resource and verify it remains on the ground; manual pickup must still work.
+11. Fill inventory and walk into selected drops. No world object should disappear without corresponding inventory space, and no repeat-pickup duplication should occur.
+12. Test standing near ore over 20 seconds to confirm one item is never credited repeatedly.
+13. Repeat as **host and non-host client**. With teammates nearby, make sure no dropped teammate-owned item is taken automatically.
+14. If manual route fails in your session, change `[Advanced] UseManualPickupRoute` to `false` and compare. Include logs and measured deltas when reporting; do not release publicly with an unconfirmed count discrepancy.
+
+## Log diagnostics
+
+Look for `Pickup request:`, `Ore discovery failed:`, `Pickup scan failed:`, and `native UI font:`. Debug log lines may require a verbose BepInEx log level.
