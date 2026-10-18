@@ -2,12 +2,13 @@
 
 A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
 
-## Features (development 0.2.5)
+## Features (development 0.2.6)
 
 - Press **F10** to open the main settings window.
 - Choose **CONFIGURE ORES** to open a separate resource selection window.
 - Each resource displays the game's **actual item icon**, localized name (when available), a material-colored label, and an individual **PICK UP / IGNORE** toggle.
 - Search resources by name or item ID, plus **ENABLE ALL / DISABLE ALL** actions.
+- **Stone is ignored by default** on both known maps (`STONE`, `STONE_MAP_2`); all other discovered resource IDs default to auto-pickup ON. The selection remains configurable per resource.
 - Uses Stonewards' own `Jersey10-Regular` UI font when loaded, falling back to `Jersey10-Regular2`.
 - Adjust auto-pickup radius from **1.0 m to 4.0 m** and rebind F10.
 - Selection and key preferences persist in `BepInEx/config/community.stonewards.oreautopickup.cfg`.
@@ -34,6 +35,14 @@ Ore discovery and selection are always dynamic: the source of truth is the game'
 Unknown/future resource IDs are still supported: use readable icon-derived tints when possible, otherwise stable per-ID colors. No assumed resources are added to the filter.
 
 To check what your particular game has loaded, search `BepInEx/LogOutput.log` in the active profile for `Discovered real mined resource`. Resource logs include ID, localized name, sprite name, rarity and assigned tint.
+
+## Default ore selection (0.2.6)
+
+Confirmed Stonewards map 1 and map 2 IDs:
+- **Off by default:** `STONE`, `STONE_MAP_2` (both display as Stone).
+- **On by default:** `IRON`, `DIAMOND`, `GOLD`, `EMERALD`, `IRON_MAP_2` (Copper), `GOLD_MAP_2` (Platinum), `EMERALD_MAP_2` (Ruby).
+
+The plugin uses exact game IDs, not ambiguous prefixes. Existing profiles had Stone saved as enabled by older versions; a **one-time per-ID migration** turns Stone off when each resource is first discovered after upgrading. It does not touch selections for other materials. After this migration, you can manually re-enable Stone using F10 → CONFIGURE ORES, and the choice persists across future restarts. Migration settings are stored in the same BepInEx profile config.
 
 ## Dropping ore without collecting it again (0.2.5)
 
@@ -73,7 +82,7 @@ Launch **Start modded** using the same profile. The resource list is loaded dyna
 
 ## Current status
 
-**0.2.5 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
+**0.2.6 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
 
 ## Feedback
 
