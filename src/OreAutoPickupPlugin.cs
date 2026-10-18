@@ -22,7 +22,7 @@ namespace StonewardsOreAutoPickup
         private const float RetryDelay = 7f;
         private const int MaxPickupRequestsPerScan = 8;
         private const float WindowWidth = 516f;
-        private const float WindowHeight = 602f;
+        private const float WindowHeight = 390f;
 
         // Colors follow Stonewards/PartyHUD: graphite, slate, burgundy, and warm gold.
         private static readonly Color Frame = new Color(0.72f, 0.64f, 0.48f, 1f);
@@ -69,6 +69,7 @@ namespace StonewardsOreAutoPickup
         private float _nextScan;
         private float _nextCleanup;
         private Vector2 _scroll;
+        private string _oreSearch = "";
         private string _notice = "";
         private bool _warnedNoProfileField;
         private bool _loggedDiscovery;
@@ -406,41 +407,69 @@ namespace StonewardsOreAutoPickup
 
         private void EnsureStyles()
         {
-            if (_titleStyle != null)
+            if (_titleStyle == null)
+            {
+                _titleStyle = MakeStyle(24, Gold, TextAnchor.MiddleLeft);
+                _labelStyle = MakeStyle(18, Text, TextAnchor.MiddleLeft);
+                _mutedStyle = MakeStyle(15, MutedText, TextAnchor.MiddleLeft);
+                _mutedStyle.wordWrap = true;
+                _smallGoldStyle = MakeStyle(16, Gold, TextAnchor.MiddleLeft);
+                _miniStyle = MakeStyle(14, MutedText, TextAnchor.MiddleRight);
+                _buttonStyle = new GUIStyle(GUI.skin.button)
+                {
+                    fontSize = 18,
+                    fontStyle = FontStyle.Normal,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { background = null, textColor = Text },
+                    hover = { background = null, textColor = Gold },
+                    active = { background = null, textColor = Gold },
+                    focused = { background = null, textColor = Text }
+                };
+            }
+            TryApplyNativeFont();
+        }
+
+        private static GUIStyle MakeStyle(int size, Color color, TextAnchor align)
+        {
+            var style = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = size,
+                fontStyle = FontStyle.Normal,
+                alignment = align,
+                clipping = TextClipping.Clip,
+                richText = false
+            };
+            style.normal.textColor = color;
+            return style;
+        }
+
+        private void TryApplyNativeFont()
+        {
+            if (_nativeUiFont != null || Time.unscaledTime < _nextFontLookup)
                 return;
-            _titleStyle = new GUIStyle(GUI.skin.label)
+            _nextFontLookup = Time.unscaledTime + 8f;
+            Font primary = null;
+            Font fallback = null;
+            foreach (var font in Resources.FindObjectsOfTypeAll<Font>())
             {
-                fontSize = 18, fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = Gold }
-            };
-            _labelStyle = new GUIStyle(GUI.skin.label)
+                if (font == null)
+                    continue;
+                if (font.name == "Jersey10-Regular")
+                    primary = font;
+                else if (font.name == "Jersey10-Regular2")
+                    fallback = font;
+            }
+            _nativeUiFont = primary != null ? primary : fallback;
+            if (_nativeUiFont == null)
+                return;
+            foreach (var style in new[] {
+                _titleStyle, _labelStyle, _mutedStyle, _smallGoldStyle,
+                _miniStyle, _buttonStyle })
             {
-                fontSize = 14, fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = Text }
-            };
-            _mutedStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 12, alignment = TextAnchor.MiddleLeft,
-                wordWrap = true,
-                normal = { textColor = MutedText }
-            };
-            _smallGoldStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 12, fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = Gold }
-            };
-            _buttonStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = 12, fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { background = null, textColor = Text },
-                hover = { background = null, textColor = Gold },
-                active = { background = null, textColor = Gold },
-                focused = { background = null, textColor = Text },
-            };
+                style.font = _nativeUiFont;
+                style.fontStyle = FontStyle.Normal;
+            }
+            Logger.LogInfo("Ore Auto Pickup native UI font: " + _nativeUiFont.name);
         }
 
         private void OnGUI()
@@ -455,8 +484,10 @@ namespace StonewardsOreAutoPickup
             {
                 GUI.depth = -550;
                 GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-                float x = Mathf.Max(0f, (Screen.width / scale - WindowWidth) * 0.5f);
-                float y = Mathf.Max(0f, (Screen.height / scale - WindowHeight) * 0.5f);
+                float width = _oreWindowOpen ? OreWindowWidth : WindowWidth;
+                float height = _oreWindowOpen ? OreWindowHeight : WindowHeight;
+                float x = Mathf.Max(0f, (Screen.width / scale - width) * 0.5f);
+                float y = Mathf.Max(0f, (Screen.height / scale - height) * 0.5f);
                 DrawMenu(x, y);
             }
             finally
@@ -468,89 +499,183 @@ namespace StonewardsOreAutoPickup
 
         private void DrawMenu(float x, float y)
         {
-            Panel(new Rect(x, y, WindowWidth, WindowHeight), Background);
-            Fill(new Rect(x + 2f, y + 2f, WindowWidth - 4f, 57f), Header);
-            Fill(new Rect(x + 2f, y + 58f, WindowWidth - 4f, 2f), Gold);
-            GUI.Label(new Rect(x + 20f, y + 13f, 400f, 28f), "ORE AUTO PICKUP", _titleStyle);
-            if (Button(new Rect(x + WindowWidth - 52f, y + 14f, 31f, 30f), "X"))
-                CloseMenu();
+            if (_oreWindowOpen)
+            {
+                DrawOreSelection(x, y);
+                return;
+            }
 
-            GUI.Label(new Rect(x + 20f, y + 72f, 285f, 25f), "Automatic collection", _labelStyle);
-            if (Button(new Rect(x + WindowWidth - 112f, y + 73f, 90f, 28f),
+            Panel(new Rect(x, y, WindowWidth, WindowHeight), Background);
+            Fill(new Rect(x + 2f, y + 2f, WindowWidth - 4f, 58f), Header);
+            Fill(new Rect(x + 2f, y + 58f, WindowWidth - 4f, 2f), Gold);
+            GUI.Label(new Rect(x + 20f, y + 10f, 392f, 38f),
+                "ORE AUTO PICKUP", _titleStyle);
+            if (Button(new Rect(x + WindowWidth - 55f, y + 14f, 32f, 31f), "X"))
+            {
+                CloseMenu();
+                return;
+            }
+
+            GUI.Label(new Rect(x + 20f, y + 73f, 292f, 31f),
+                "Auto pickup", _labelStyle);
+            if (Button(new Rect(x + 341f, y + 74f, 150f, 31f),
                 _enabled.Value ? "ENABLED" : "DISABLED", _enabled.Value))
             {
                 _enabled.Value = !_enabled.Value;
                 Config.Save();
             }
 
-            GUI.Label(new Rect(x + 20f, y + 109f, 260f, 23f), "Pickup radius", _labelStyle);
-            var radiusRect = new Rect(x + 200f, y + 115f, 204f, 18f);
-            var newRadius = GUI.HorizontalSlider(radiusRect, _radius.Value, 1f, 4f);
-            if (Mathf.Abs(newRadius - _radius.Value) > 0.04f)
+            GUI.Label(new Rect(x + 20f, y + 117f, 226f, 31f),
+                "Pickup radius", _labelStyle);
+            float newRadius = GUI.HorizontalSlider(
+                new Rect(x + 242f, y + 126f, 166f, 18f), _radius.Value, 1f, 4f);
+            if (Mathf.Abs(newRadius - _radius.Value) > 0.05f)
             {
                 _radius.Value = (float)Math.Round(newRadius * 10f) / 10f;
                 Config.Save();
             }
-            GUI.Label(new Rect(x + 414f, y + 106f, 74f, 30f),
+            GUI.Label(new Rect(x + 421f, y + 116f, 79f, 31f),
                 _radius.Value.ToString("0.0") + " m", _smallGoldStyle);
-            Fill(new Rect(x + 20f, y + 146f, WindowWidth - 40f, 1f), Divider);
 
-            GUI.Label(new Rect(x + 20f, y + 154f, 325f, 25f), "Mined resources", _labelStyle);
-            if (Button(new Rect(x + 295f, y + 154f, 90f, 26f), "ALL ON"))
-                SetAll(true);
-            if (Button(new Rect(x + 394f, y + 154f, 100f, 26f), "ALL OFF"))
-                SetAll(false);
-
-            var view = new Rect(x + 20f, y + 190f, WindowWidth - 40f, 245f);
-            Panel(view, MutedSlot);
-            var scrollHeight = Mathf.Max(view.height - 4f, _orderedOres.Count * 42f + 12f);
-            _scroll = GUI.BeginScrollView(new Rect(view.x + 3f, view.y + 3f, view.width - 6f, view.height - 6f),
-                _scroll, new Rect(0f, 0f, view.width - 25f, scrollHeight));
-            if (_orderedOres.Count == 0)
+            Fill(new Rect(x + 20f, y + 162f, WindowWidth - 40f, 1f), Divider);
+            GUI.Label(new Rect(x + 20f, y + 170f, 263f, 33f),
+                "Ore selection", _labelStyle);
+            int selectedCount = 0;
+            foreach (var ore in _orderedOres)
+                if (ore.AutoPick.Value)
+                    selectedCount++;
+            if (Button(new Rect(x + 291f, y + 170f, 200f, 34f),
+                "CONFIGURE ORES  >"))
             {
-                GUI.Label(new Rect(12f, 13f, view.width - 35f, 64f),
-                    "Ore definitions not loaded. Enter a level and mine a resource; discovery will retry automatically.",
-                    _mutedStyle);
+                _scroll = Vector2.zero;
+                _oreWindowOpen = true;
+                DiscoverOres();
             }
-            else
-            {
-                for (int i = 0; i < _orderedOres.Count; i++)
-                {
-                    var option = _orderedOres[i];
-                    float ry = 8f + i * 42f;
-                    Fill(new Rect(8f, ry, view.width - 36f, 36f), Slot);
-                    GUI.Label(new Rect(19f, ry + 2f, view.width - 161f, 30f),
-                        option.Name, _labelStyle);
-                    bool active = option.AutoPick.Value;
-                    if (Button(new Rect(view.width - 139f, ry + 3f, 104f, 29f),
-                        active ? "AUTO: ON" : "AUTO: OFF", active))
-                    {
-                        option.AutoPick.Value = !active;
-                        Config.Save();
-                        _notice = option.Name + " saved";
-                    }
-                }
-            }
-            GUI.EndScrollView();
+            GUI.Label(new Rect(x + 20f, y + 203f, WindowWidth - 40f, 25f),
+                selectedCount + " / " + _orderedOres.Count + " resource types enabled",
+                _mutedStyle);
+            Fill(new Rect(x + 20f, y + 239f, WindowWidth - 40f, 1f), Divider);
 
-            Fill(new Rect(x + 20f, y + 447f, WindowWidth - 40f, 1f), Divider);
-            GUI.Label(new Rect(x + 20f, y + 459f, 260f, 30f), "Settings shortcut", _labelStyle);
-            string keyText = _captureShortcut ? "PRESS KEY..." : _settingsKey.Value.ToString();
-            if (Button(new Rect(x + 283f, y + 459f, 212f, 31f), keyText, _captureShortcut))
+            GUI.Label(new Rect(x + 20f, y + 250f, 255f, 30f),
+                "Settings shortcut", _labelStyle);
+            if (Button(new Rect(x + 281f, y + 250f, 210f, 31f),
+                _captureShortcut ? "PRESS KEY..." : _settingsKey.Value.ToString(),
+                _captureShortcut))
             {
                 _captureShortcut = true;
                 _notice = "Press Esc to cancel";
             }
             if (_captureShortcut)
                 CaptureShortcut();
-
-            GUI.Label(new Rect(x + 20f, y + 501f, WindowWidth - 40f, 32f),
-                "Only mined resources are collected. Manual pickup remains unchanged.", _mutedStyle);
-            GUI.Label(new Rect(x + 20f, y + 537f, WindowWidth - 40f, 20f),
-                _orderedOres.Count + " resource types found" +
-                (string.IsNullOrEmpty(_notice) ? "" : "    |    " + _notice), _smallGoldStyle);
-            if (Button(new Rect(x + 20f, y + 564f, WindowWidth - 40f, 27f), "CLOSE SETTINGS"))
+            GUI.Label(new Rect(x + 20f, y + 286f, WindowWidth - 40f, 35f),
+                "Nearby mined ore only. Other items use vanilla pickup.",
+                _mutedStyle);
+            if (!string.IsNullOrEmpty(_notice))
+                GUI.Label(new Rect(x + 20f, y + 323f, WindowWidth - 40f, 22f),
+                    _notice, _smallGoldStyle);
+            if (Button(new Rect(x + 20f, y + 354f, WindowWidth - 40f, 28f),
+                "CLOSE SETTINGS"))
                 CloseMenu();
+        }
+
+        private void DrawOreSelection(float x, float y)
+        {
+            Panel(new Rect(x, y, OreWindowWidth, OreWindowHeight), Background);
+            Fill(new Rect(x + 2f, y + 2f, OreWindowWidth - 4f, 58f), Header);
+            Fill(new Rect(x + 2f, y + 58f, OreWindowWidth - 4f, 2f), Gold);
+            GUI.Label(new Rect(x + 20f, y + 11f, 420f, 37f),
+                "ORE PICKUP FILTER", _titleStyle);
+            if (Button(new Rect(x + OreWindowWidth - 56f, y + 14f, 34f, 31f), "X"))
+            {
+                _oreWindowOpen = false;
+                return;
+            }
+
+            GUI.Label(new Rect(x + 20f, y + 72f, OreWindowWidth - 40f, 33f),
+                "Choose which mined resources go into your inventory.", _mutedStyle);
+            if (Button(new Rect(x + 20f, y + 112f, 152f, 33f), "ENABLE ALL"))
+                SetAll(true);
+            if (Button(new Rect(x + 181f, y + 112f, 154f, 33f), "DISABLE ALL"))
+                SetAll(false);
+            GUI.Label(new Rect(x + 351f, y + 112f, 198f, 33f),
+                _orderedOres.Count + " discovered", _miniStyle);
+
+            GUI.Label(new Rect(x + 20f, y + 160f, 91f, 29f), "FIND", _labelStyle);
+            Fill(new Rect(x + 99f, y + 161f, OreWindowWidth - 120f, 29f), Slot);
+            _oreSearch = GUI.TextField(new Rect(x + 106f, y + 160f, OreWindowWidth - 135f, 31f),
+                _oreSearch, 60, _labelStyle);
+
+            var visible = new List<OreOption>();
+            foreach (var ore in _orderedOres)
+                if (string.IsNullOrWhiteSpace(_oreSearch) ||
+                    ore.Name.IndexOf(_oreSearch, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ore.Id.IndexOf(_oreSearch, StringComparison.OrdinalIgnoreCase) >= 0)
+                    visible.Add(ore);
+
+            var area = new Rect(x + 20f, y + 202f, OreWindowWidth - 40f, 315f);
+            Panel(area, MutedSlot);
+            float contentHeight = Mathf.Max(area.height - 7f, visible.Count * 57f + 13f);
+            _scroll = GUI.BeginScrollView(
+                new Rect(area.x + 3f, area.y + 3f, area.width - 6f, area.height - 6f),
+                _scroll, new Rect(0f, 0f, area.width - 26f, contentHeight));
+            if (_orderedOres.Count == 0)
+                GUI.Label(new Rect(12f, 12f, area.width - 42f, 82f),
+                    "Ore types are not available yet. Enter a level and mine a resource.",
+                    _mutedStyle);
+            else if (visible.Count == 0)
+                GUI.Label(new Rect(12f, 12f, area.width - 42f, 52f),
+                    "Nothing matches the filter.", _mutedStyle);
+
+            for (int i = 0; i < visible.Count; i++)
+            {
+                var ore = visible[i];
+                float ry = i * 57f + 8f;
+                Fill(new Rect(8f, ry, area.width - 33f, 51f), Slot);
+                DrawOreIcon(ore.Icon, new Rect(16f, ry + 5f, 41f, 41f));
+                var previous = GUI.contentColor;
+                GUI.contentColor = ore.Tint;
+                GUI.Label(new Rect(71f, ry + 5f, area.width - 237f, 40f),
+                    ore.Name, _labelStyle);
+                GUI.contentColor = previous;
+                if (Button(new Rect(area.width - 150f, ry + 8f, 112f, 33f),
+                    ore.AutoPick.Value ? "PICK UP" : "IGNORE", ore.AutoPick.Value))
+                {
+                    ore.AutoPick.Value = !ore.AutoPick.Value;
+                    Config.Save();
+                    _notice = ore.Name + (ore.AutoPick.Value ? " enabled" : " disabled");
+                }
+            }
+            GUI.EndScrollView();
+            Fill(new Rect(x + 20f, y + 530f, OreWindowWidth - 40f, 1f), Divider);
+            GUI.Label(new Rect(x + 20f, y + 539f, OreWindowWidth - 40f, 26f),
+                string.IsNullOrEmpty(_notice) ? "Changes are saved immediately." : _notice,
+                _mutedStyle);
+            if (Button(new Rect(x + 20f, y + 576f, OreWindowWidth - 40f, 29f),
+                "<  BACK TO SETTINGS"))
+                _oreWindowOpen = false;
+        }
+
+        private static void DrawOreIcon(Sprite icon, Rect rect)
+        {
+            if (icon == null || icon.texture == null)
+            {
+                Panel(rect, MutedSlot);
+                return;
+            }
+            try
+            {
+                var texture = icon.texture;
+                var spriteRect = icon.textureRect;
+                var uv = new Rect(
+                    spriteRect.x / texture.width, spriteRect.y / texture.height,
+                    spriteRect.width / texture.width, spriteRect.height / texture.height);
+                GUI.DrawTextureWithTexCoords(rect, texture, uv, true);
+            }
+            catch (Exception)
+            {
+                // Some sprites are tightly packed. Render a neutral fallback.
+                Panel(rect, MutedSlot);
+            }
         }
 
         private void SetAll(bool value)
