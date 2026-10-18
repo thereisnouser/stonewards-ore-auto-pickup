@@ -2,7 +2,7 @@
 
 A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collects the mined resources you select, without creating inventory items out of thin air.
 
-## Features (development 0.2.3)
+## Features (development 0.2.4)
 
 - Press **F10** to open the main settings window.
 - Choose **CONFIGURE ORES** to open a separate resource selection window.
@@ -13,13 +13,27 @@ A lightweight **client-side BepInEx 5** mod for Stonewards. Automatically collec
 - Selection and key preferences persist in `BepInEx/config/community.stonewards.oreautopickup.cfg`.
 - Only automatically collects unowned mined-resource world pickups; leaves dropped player items and other loot alone.
 
-## Resource identities and color (0.2.3)
+## Real resource IDs and readable colors (0.2.4)
 
-**No hard-coded ore names.** The plugin discovers only the actual `ItemDataSO` records referenced by loaded `DigMatterProfileSO.resourceClusters`. Any previous examples of materials that were not verified against Stonewards' item database have been removed from the source.
+Ore discovery and selection are always dynamic: the source of truth is the game's own `ItemDataSO` referenced in `DigMatterProfileSO.resourceClusters`. Only material colors are explicitly mapped, using **nine exact IDs observed in a player's Stonewards 0.2.3 BepInEx log** across the first two maps:
 
-For each discovered item, the plugin uses the game's actual ID, localized display name and icon. The text color is sampled from its icon where the Unity texture is readable; if it is not, a consistent per-ID color is generated without pretending to know the ore's natural color.
+| In-game item ID | In-game name | Color |
+|---|---|---|
+| `STONE` | Stone | Warm gray `#BEBEB2` |
+| `IRON` | Iron | Steel blue-gray `#AAC2CE` |
+| `DIAMOND` | Diamond | Icy cyan `#7BDFF1` |
+| `GOLD` | Gold | Gold `#FFCD56` |
+| `EMERALD` | Emerald | Green `#57DB80` |
+| `STONE_MAP_2` | Stone | Warm gray `#BEBEB2` |
+| `IRON_MAP_2` | Copper | Copper orange `#EB8E56` |
+| `GOLD_MAP_2` | Platinum | Cool platinum `#D8E1EC` |
+| `EMERALD_MAP_2` | Ruby | Ruby red `#F45D73` |
 
-To inspect the **real list for your installed game version**, load a playable level with the mod enabled and open the active r2modman profile's `BepInEx/LogOutput.log`. Each discovered ore is logged as `Discovered real mined resource: ID=...; Name=...; Icon=...; Rarity=...; Tint=#...`. Only these actual log entries can support adding a verified, game-specific palette later.
+**Technical IDs are not material names.** For instance `IRON_MAP_2` is Copper, not Iron. The colors above are carefully chosen approximations for clear HUD text, **not measured RGB values from game icon textures**.
+
+Unknown/future resource IDs are still supported: use readable icon-derived tints when possible, otherwise stable per-ID colors. No assumed resources are added to the filter.
+
+To check what your particular game has loaded, search `BepInEx/LogOutput.log` in the active profile for `Discovered real mined resource`. Resource logs include ID, localized name, sprite name, rarity and assigned tint.
 
 ## Pickup notifications and inventory quantities
 
@@ -53,7 +67,7 @@ Launch **Start modded** using the same profile. The resource list is loaded dyna
 
 ## Current status
 
-**0.2.3 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
+**0.2.4 development build**, not a Thunderstore release. Updated source has not been compiled against the user's installed game or tested in multiplayer from this environment. See [the test plan](docs/TEST_PLAN.md) for the quantity, UI, icon and co-op checks required before a public release.
 
 ## Feedback
 
