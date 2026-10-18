@@ -512,10 +512,6 @@ namespace StonewardsOreAutoPickup
         /// </summary>
         private static Color OreTint(string label, Rarity rarity, Sprite icon)
         {
-            Color sampled;
-            if (TrySampleIconColor(icon, out sampled))
-                return sampled;
-
             string name = (label ?? "").ToLowerInvariant();
             if (name.Contains("gold") || name.Contains("золот"))
                 return new Color(1f, 0.78f, 0.24f);
@@ -554,6 +550,12 @@ namespace StonewardsOreAutoPickup
                 return new Color(0.50f, 0.95f, 1f);
             if (name.Contains("obsidian") || name.Contains("обсидиан"))
                 return new Color(0.67f, 0.51f, 0.85f);
+
+            // For unfamiliar materials, sample the ore's actual icon when
+            // readable instead of falling back to a shared rarity color.
+            Color sampled;
+            if (TrySampleIconColor(icon, out sampled))
+                return sampled;
 
             // Unknown game or modded ores must still be visually distinguishable
             // even when they share a rarity. Stable per-item ID, not Random or
@@ -622,10 +624,10 @@ namespace StonewardsOreAutoPickup
                 // Pale/metallic materials should stay silver rather than
                 // acquiring an arbitrary bright hue due to texture noise.
                 if (sat < 0.12f)
-                    tint = new Color(0.78f, 0.83f, 0.89f);
-                else
-                    tint = Color.HSVToRGB(hue, Mathf.Clamp(sat * 1.28f, 0.45f, 0.87f),
-                        Mathf.Clamp(value * 1.24f, 0.85f, 1f));
+                    return false; // Let the ID/name-specific palette decide.
+
+                tint = Color.HSVToRGB(hue, Mathf.Clamp(sat * 1.28f, 0.45f, 0.87f),
+                    Mathf.Clamp(value * 1.24f, 0.85f, 1f));
                 return true;
             }
             catch (Exception)
