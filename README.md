@@ -45,12 +45,6 @@ The manual pickup route (`CmdPickupItem`) remains the default. If it does not wo
 
 **This behavior requires in-game verification.** We have not yet validated the exact inventory sync timing or compile/runtime compatibility after these changes.
 
-
-
-Earlier builds sent the game's `CmdAutoPickupItem` command, which players reported could show a number on screen that did not match the amount received. In **0.2.0**, the plugin uses the normal `CmdPickupItem` path instead, which should preserve vanilla stack handling, and rate-limits attempts per world object. **This is a proposed fix, not yet confirmed in a game session.**
-
-If this route behaves differently on a particular host or client, the advanced setting `UseManualPickupRoute = false` restores the older `CmdAutoPickupItem` approach. The mod never calls `CmdForcePickupItem`, never directly increases inventory counts and never destroys world pickups locally.
-
 ## Build & install
 
 Requires a local **.NET SDK**, Stonewards game assemblies and BepInEx 5 installed in the matching r2modman profile.
